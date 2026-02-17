@@ -1,8 +1,7 @@
-# Only track the main folder
+# Only track the main folder and README
 /*
-
-# Allow main folder
 !/main
+!/README.md
 
 # Dependencies (inside main)
 main/node_modules/
