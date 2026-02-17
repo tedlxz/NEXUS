@@ -342,9 +342,9 @@ export function companyTemplate(data: CompanyNoteData): string {
     'type: company',
     `name: ${toYamlValue(data.name)}`,
   ];
-  if (data.listed !== undefined) fm.push(`listed: ${data.listed}`);
-  if (data.market) fm.push(`market: ${data.market}`);
-  if (data.ticker) fm.push(`ticker: ${toYamlValue(data.ticker)}`);
+  fm.push(`listed: ${data.listed ? 'true' : 'false'}`);
+  fm.push(`market: ${data.market || ''}`);
+  fm.push(`ticker: ${data.ticker ? toYamlValue(data.ticker) : ''}`);
   if (data.industry) fm.push(`industry: ${toYamlValue(data.industry)}`);
   if (data.tags?.length) {
     fm.push('tags:');
