@@ -2,7 +2,7 @@
 
 > Personal Network Management for PE Professionals
 
-![Version](https://img.shields.io/badge/version-0.2.3-blue)
+![Version](https://img.shields.io/badge/version-0.2.2-blue)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-green)
 
 NEXUS is a personal CRM system that combines a Telegram Bot with an Obsidian Vault. It helps you manage your professional network with AI-powered features.
@@ -166,3 +166,13 @@ main/
 ## License
 
 Private - All rights reserved
+
+## Changelog
+
+### v0.2.2 (2026-02-18)
+- Initial release with Telegram bot
+- Contact management via Telegram
+- Conversation logging with AI summaries
+- Newsflow AI news monitoring
+- Obsidian vault integration
+- SQLite caching layer
