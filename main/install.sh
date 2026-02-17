@@ -37,14 +37,62 @@ print_info() {
     echo -e "${BLUE}ℹ $1${NC}"
 }
 
-# 检测操作系统
-detect_os() {
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        echo "macos"
-    elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
-        echo "linux"
+# 检测常见代理
+detect_proxy() {
+    local proxy=""
+    local proxies=(
+        "http://127.0.0.1:7890"      # Clash/V2Ray
+        "http://127.0.0.1:7891"      # Clash 备用
+        "http://127.0.0.1:1080"      # Shadowsocks
+        "http://127.0.0.1:1087"      # Shadowsocks 备用
+        "http://127.0.0.1:8080"      # 通用
+        "http://127.0.0.1:8888"      # 通用
+        "socks5://127.0.0.1:7890"    # Clash SOCKS5
+        "socks5://127.0.0.1:1080"    # SS SOCKS5
+    )
+
+    print_info "检测代理配置..."
+
+    # 先检查环境变量
+    if [ -n "$HTTP_PROXY" ] || [ -n "$http_proxy" ]; then
+        proxy="${HTTP_PROXY}${http_proxy}"
+        print_info "检测到环境变量代理: $proxy"
+    fi
+
+    # 如果环境变量没有，尝试检测常见代理端口
+    if [ -z "$proxy" ]; then
+        for p in "${proxies[@]}"; do
+            local port=$(echo $p | sed -n 's/.*:\([0-9]*\)$/\1/p')
+            if curl -s -o /dev/null -w "%{http_code}" --proxy "$p" https://api.telegram.org --max-time 3 2>/dev/null | grep -q "200\|301\|302"; then
+                proxy="$p"
+                print_success "检测到可用代理: $proxy"
+                break
+            fi
+        done
+    fi
+
+    # 输出检测到的代理
+    echo "$proxy"
+}
+
+# 自动配置代理
+auto_config_proxy() {
+    local proxy=$(detect_proxy)
+
+    if [ -n "$proxy" ]; then
+        sed -i '' "s|^TELEGRAM_PROXY=.*|TELEGRAM_PROXY=$proxy|" .env
+        print_success "已自动配置 Telegram 代理: $proxy"
     else
-        echo "unsupported"
+        print_warning "未检测到代理，可能无法访问 Telegram"
+        echo ""
+        echo -n "请手动输入 Telegram 代理 (直接回车跳过): "
+        read -r manual_proxy
+        if [ -n "$manual_proxy" ]; then
+            sed -i '' "s|^TELEGRAM_PROXY=.*|TELEGRAM_PROXY=$manual_proxy|" .env
+            print_success "已配置代理: $manual_proxy"
+        else
+            print_info "跳过代理配置（如需手动配置，稍后可编辑 .env 文件）"
+        fi
     fi
 }
 
@@ -214,6 +262,10 @@ main() {
     echo ""
     if [[ $REPLY =~ ^[Yy]$ ]]; then
         configure
+        # 自动检测并配置代理
+        echo ""
+        print_info "检测网络环境..."
+        auto_config_proxy
     fi
 
     # 安装依赖
