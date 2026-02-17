@@ -1,0 +1,407 @@
+import fs from 'fs/promises';
+import path from 'path';
+import { vaultPaths, PersonData, ConversationData, ResearchData } from '../config';
+import {
+  personTemplate,
+  conversationTemplate,
+  researchTemplate,
+  dailyNoteTemplate,
+  dailyNoteEntry,
+  companyTemplate,
+} from './templates';
+
+async function ensureDir(dirPath: string): Promise<void> {
+  await fs.mkdir(dirPath, { recursive: true });
+}
+
+/** Ensure all vault folders exist */
+export async function ensureVaultFolders(): Promise<void> {
+  await ensureDir(vaultPaths.people);
+  await ensureDir(vaultPaths.conversations);
+  await ensureDir(vaultPaths.companies);
+  await ensureDir(vaultPaths.research);
+  await ensureDir(vaultPaths.daily);
+  await ensureDir(vaultPaths.templates);
+  await ensureDir(vaultPaths.raw);
+  await ensureDir(vaultPaths.system);
+}
+
+/** Atomic write: write to temp file then rename */
+async function atomicWrite(filePath: string, content: string): Promise<void> {
+  const dir = path.dirname(filePath);
+  await ensureDir(dir);
+  const tmp = filePath + '.tmp.' + Date.now();
+  await fs.writeFile(tmp, content, 'utf-8');
+  await fs.rename(tmp, filePath);
+}
+
+async function fileExists(filePath: string): Promise<boolean> {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export class VaultWriter {
+  async createPerson(data: PersonData): Promise<string> {
+    const filePath = path.join(vaultPaths.people, `${data.name}.md`);
+    const content = personTemplate(data);
+    await atomicWrite(filePath, content);
+    return filePath;
+  }
+
+  async updatePerson(name: string, updates: Partial<PersonData>): Promise<void> {
+    const filePath = path.join(vaultPaths.people, `${name}.md`);
+    const exists = await fileExists(filePath);
+    if (!exists) {
+      // Create new if doesn't exist
+      await this.createPerson({ name, ...updates });
+      return;
+    }
+
+    const matter = await import('gray-matter');
+    const raw = await fs.readFile(filePath, 'utf-8');
+    const parsed = matter.default(raw);
+
+    // Merge frontmatter
+    const updatedFm = { ...parsed.data };
+    if (updates.current_role !== undefined) updatedFm.current_role = updates.current_role;
+    if (updates.current_org !== undefined) updatedFm.current_org = updates.current_org;
+    if (updates.industries !== undefined) updatedFm.industries = updates.industries;
+    if (updates.closeness !== undefined) updatedFm.closeness = updates.closeness;
+    if (updates.starred !== undefined) updatedFm.starred = updates.starred;
+    if (updates.how_we_met !== undefined) updatedFm.how_we_met = updates.how_we_met;
+    if (updates.introduced_by !== undefined) updatedFm.introduced_by = `[[${updates.introduced_by}]]`;
+    if (updates.last_contact !== undefined) updatedFm.last_contact = updates.last_contact;
+    if (updates.tags !== undefined) updatedFm.tags = updates.tags;
+    updatedFm.updated = new Date().toISOString().slice(0, 10);
+
+    let body = parsed.content;
+
+    // Update specific sections if provided
+    if (updates.profile) body = replaceSection(body, 'Profile', updates.profile);
+    if (updates.career_history) body = replaceSection(body, 'Career History', updates.career_history);
+    if (updates.education) body = replaceSection(body, 'Education', updates.education);
+    if (updates.areas_of_expertise) body = replaceSection(body, 'Areas of Expertise', updates.areas_of_expertise);
+    if (updates.key_connections) body = replaceSection(body, 'Key Connections', updates.key_connections);
+    if (updates.public_info) body = replaceSection(body, 'Public Internet Info', updates.public_info);
+    if (updates.notes) body = appendToSection(body, 'My Notes', updates.notes);
+
+    const newContent = matter.default.stringify(body, updatedFm);
+    await atomicWrite(filePath, newContent);
+  }
+
+  async createConversation(data: ConversationData): Promise<string> {
+    const fileName = `${data.date} ${data.contact} ${data.source}.md`;
+    const filePath = path.join(vaultPaths.conversations, fileName);
+    const content = conversationTemplate(data);
+    await atomicWrite(filePath, content);
+
+    // Save raw transcript if provided
+    if (data.raw_transcript) {
+      await this.saveRawTranscript(data.contact, data.date, data.raw_transcript);
+    }
+
+    return filePath;
+  }
+
+  async saveRawTranscript(contactName: string, date: string, content: string): Promise<string> {
+    const filePath = path.join(vaultPaths.raw, `${date} ${contactName}.txt`);
+    await atomicWrite(filePath, content);
+    return filePath;
+  }
+
+  async createResearch(data: ResearchData): Promise<string> {
+    const filePath = path.join(vaultPaths.research, `${data.topic}.md`);
+    const content = researchTemplate(data);
+    await atomicWrite(filePath, content);
+    return filePath;
+  }
+
+  async appendDailyNote(message: string, result: string): Promise<void> {
+    const today = new Date().toISOString().slice(0, 10);
+    const filePath = path.join(vaultPaths.daily, `${today}.md`);
+    const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
+
+    const exists = await fileExists(filePath);
+    if (!exists) {
+      const content = dailyNoteTemplate(today) + dailyNoteEntry(timestamp, message, result);
+      await atomicWrite(filePath, content);
+    } else {
+      const entry = dailyNoteEntry(timestamp, message, result);
+      await fs.appendFile(filePath, entry, 'utf-8');
+    }
+  }
+
+  async addConversationLink(contactName: string, conversationFile: string): Promise<void> {
+    const filePath = path.join(vaultPaths.people, `${contactName}.md`);
+    const exists = await fileExists(filePath);
+    if (!exists) return;
+
+    const content = await fs.readFile(filePath, 'utf-8');
+    const convBaseName = path.basename(conversationFile, '.md');
+    const link = `- [[${convBaseName}]]`;
+
+    // Insert link under "## Conversation Records"
+    const updated = appendToSection(content, 'Conversation Records', link);
+
+    // Update last_contact in frontmatter
+    const matter = await import('gray-matter');
+    const parsed = matter.default(updated);
+    parsed.data.last_contact = new Date().toISOString().slice(0, 10);
+    parsed.data.updated = new Date().toISOString().slice(0, 10);
+
+    const newContent = matter.default.stringify(parsed.content, parsed.data);
+    await atomicWrite(filePath, newContent);
+  }
+
+  async readFile(filePath: string): Promise<string | null> {
+    try {
+      return await fs.readFile(filePath, 'utf-8');
+    } catch {
+      return null;
+    }
+  }
+
+  async listPeople(): Promise<string[]> {
+    try {
+      const files = await fs.readdir(vaultPaths.people);
+      return files.filter(f => f.endsWith('.md')).map(f => f.replace('.md', ''));
+    } catch {
+      return [];
+    }
+  }
+
+  async saveDashboard(): Promise<string> {
+    const dashboard = await generateDataDashboard();
+    const filePath = path.join(vaultPaths.system, 'Data Dashboard.md');
+    await atomicWrite(filePath, dashboard);
+    return filePath;
+  }
+
+  async saveStarredList(): Promise<string> {
+    const starredMd = await generateStarredList();
+    const filePath = path.join(vaultPaths.system, 'Starred.md');
+    await atomicWrite(filePath, starredMd);
+    return filePath;
+  }
+
+  /** Create or update a company file in Obsidian */
+  async createOrUpdateCompany(
+    companyName: string,
+    relatedContacts: Array<{ name: string; role: string; relationship: 'current' | 'past' }> = [],
+    relatedConversations: Array<{ date: string; contact: string; summary: string }> = [],
+    industry?: string,
+    description?: string,
+    starred?: boolean,
+    listed?: boolean,
+    market?: 'us' | 'cn' | 'hk' | 'jp' | 'kr',
+    ticker?: string
+  ): Promise<string> {
+    // Sanitize company name for filename (remove invalid characters)
+    const safeName = companyName.replace(/[<>:"/\\|?*]/g, ' ');
+    const filePath = path.join(vaultPaths.companies, `${safeName}.md`);
+    const data = {
+      name: companyName,
+      industry,
+      description,
+      starred,
+      listed,
+      market,
+      ticker,
+      related_contacts: relatedContacts,
+      related_conversations: relatedConversations,
+    };
+    const content = companyTemplate(data);
+    await atomicWrite(filePath, content);
+    return filePath;
+  }
+
+  /** Add conversation link to a company */
+  async addConversationToCompany(
+    companyName: string,
+    conversationDate: string,
+    contactName: string,
+    summary: string
+  ): Promise<void> {
+    // Sanitize company name for filename
+    const safeName = companyName.replace(/[<>:"/\\|?*]/g, ' ');
+    const filePath = path.join(vaultPaths.companies, `${safeName}.md`);
+    try {
+      const existing = await this.readFile(filePath);
+      if (existing) {
+        // Append to Related Conversations section
+        const newEntry = `- [[${conversationDate} ${contactName}|${conversationDate}]] — ${summary.slice(0, 80)}...`;
+        const updated = appendToSection(existing, 'Related Conversations', newEntry);
+        await atomicWrite(filePath, updated);
+      }
+    } catch {
+      // File doesn't exist, create new one
+      await this.createOrUpdateCompany(companyName, [], [{ date: conversationDate, contact: contactName, summary }]);
+    }
+  }
+}
+
+function replaceSection(body: string, sectionName: string, newContent: string): string {
+  const regex = new RegExp(
+    `(## ${escapeRegex(sectionName)}\n)([\\s\\S]*?)(\n## |$)`,
+    'm'
+  );
+  const match = body.match(regex);
+  if (match) {
+    const ending = match[3] || '';
+    return body.replace(regex, `$1${newContent}\n\n${ending}`);
+  }
+  return body;
+}
+
+function appendToSection(body: string, sectionName: string, newContent: string): string {
+  const regex = new RegExp(
+    `(## ${escapeRegex(sectionName)}\n)([\\s\\S]*?)(\n## |$)`,
+    'm'
+  );
+  const match = body.match(regex);
+  if (match) {
+    const existing = match[2].trim();
+    const ending = match[3] || '';
+    const combined = existing ? `${existing}\n${newContent}` : newContent;
+    return body.replace(regex, `$1${combined}\n\n${ending}`);
+  }
+  return body;
+}
+
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Generate Starred list with all starred people and companies */
+async function generateStarredList(): Promise<string> {
+  const { getDb } = await import('../db/database');
+  const { ContactsRepo } = await import('../db/contacts-repo');
+  const { CompaniesRepo } = await import('../db/companies-repo');
+
+  const db = getDb();
+  const contactsRepo = new ContactsRepo(db);
+  const companiesRepo = new CompaniesRepo(db);
+
+  const allContacts = contactsRepo.getAll();
+  const allCompanies = companiesRepo.getAll();
+
+  const starredPeople = allContacts.filter(c => c.starred);
+  const starredCompanies = allCompanies.filter(c => c.starred);
+
+  let md = `# Starred\n\n`;
+  md += `> Last updated: ${new Date().toISOString().slice(0, 10)}\n\n`;
+
+  // People table
+  md += `## People\n`;
+  md += `| 联系人 | 职位 | 公司 |\n`;
+  md += `| --- | --- | --- |\n`;
+  for (const person of starredPeople) {
+    const name = person.name || '';
+    const role = person.current_role || '-';
+    const org = person.current_org ? `[[${person.current_org}]]` : '-';
+    md += `| [[${name}]] | ${role} | ${org} |\n`;
+  }
+
+  md += `\n## Companies\n`;
+  md += `| 公司 | 行业 |\n`;
+  md += `| --- | --- |\n`;
+  for (const company of starredCompanies) {
+    const name = company.name || '';
+    const industry = company.industry || '-';
+    md += `| [[${name}]] | ${industry} |\n`;
+  }
+
+  md += `\n---\n*Auto-generated. Starred status is set in each contact/company's frontmatter (\`starred: true\`).*\n`;
+
+  return md;
+}
+
+/** Generate Data Dashboard with all contacts and companies in a table format */
+export async function generateDataDashboard(): Promise<string> {
+  const { getDb } = await import('../db/database');
+  const { ContactsRepo } = await import('../db/contacts-repo');
+  const { ConversationsRepo } = await import('../db/conversations-repo');
+  const { CompaniesRepo } = await import('../db/companies-repo');
+  
+  const db = getDb();
+  const contactsRepo = new ContactsRepo(db);
+  const conversationsRepo = new ConversationsRepo(db);
+  const companiesRepo = new CompaniesRepo(db);
+  
+  const allContacts = contactsRepo.getAll();
+  const allCompanies = companiesRepo.getAll();
+  
+  // Build markdown
+  let md = `# 📊 Data Dashboard\n\n`;
+  md += `> Last updated: ${new Date().toISOString().slice(0, 10)}\n\n`;
+  
+  // Contacts table
+  md += `## 👥 Contacts\n\n`;
+  md += `| 联系人 | 职位 | Tags | 最近互动 | 详情 |\n`;
+  md += `| --- | --- | --- | --- | --- |\n`;
+  
+  for (const contact of allContacts) {
+    const name = contact.name || '';
+    const role = contact.current_role || '';
+    const org = contact.current_org || '';
+    const position = role && org ? `${role} @ ${org}` : (role || org || '-');
+    const tags = contact.tags ? contact.tags.join(', ') : '-';
+    
+    // Get last conversation date
+    const contactId = contactsRepo.getContactId(name);
+    let lastContact = '-';
+    if (contactId) {
+      const convs = conversationsRepo.getByContact(contactId);
+      if (convs.length > 0) {
+        lastContact = convs[0].date;
+      }
+    }
+    
+    // Build details column
+    const industries = contact.industries ? contact.industries.join(', ') : '';
+    const closeness = contact.closeness || '';
+    let details = '';
+    if (industries) details += `🏭 ${industries}`;
+    if (closeness) details += (details ? ' | ' : '') + `🤝 ${closeness}`;
+    details = details || '-';
+    
+    md += `| [[${name}]] | ${position} | ${tags} | ${lastContact} | ${details} |\n`;
+  }
+  
+  // Companies table
+  md += `\n## 🏢 Companies\n\n`;
+  md += `| 公司 | 行业 | Tags | 相关人数 | 相关对话数 |\n`;
+  md += `| --- | --- | --- | --- | --- |\n`;
+  
+  for (const company of allCompanies) {
+    const companyData = companiesRepo.findByName(company.name);
+    if (!companyData) continue;
+    
+    // Count related contacts
+    const allContactsData = contactsRepo.getAll();
+    let relatedCount = 0;
+    for (const c of allContactsData) {
+      if (c.current_org?.toLowerCase() === company.name.toLowerCase()) {
+        relatedCount++;
+      }
+    }
+    
+    // Count related conversations (from company_tags)
+    const allConvs = db.prepare('SELECT COUNT(*) as cnt FROM conversation_companies cc JOIN companies c ON cc.company_id = c.id WHERE c.name = ? COLLATE NOCASE').get(company.name) as { cnt: number };
+    const convCount = allConvs?.cnt || 0;
+    
+    const industry = company.industry || '-';
+    const tags = companyData.tags?.length ? companyData.tags.join(', ') : '-';
+    md += `| [[${company.name}]] | ${industry} | ${tags} | ${relatedCount} | ${convCount} |\n`;
+  }
+  
+  md += `\n---\n*This dashboard is auto-generated. Run \`/dashboard\` to refresh.*`;
+  
+  return md;
+}
+
+export const vaultWriter = new VaultWriter();
