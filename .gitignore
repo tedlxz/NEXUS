@@ -1,15 +1,21 @@
-# Dependencies
-node_modules/
-.venv/
-venv/
+# Only track the main folder
+/*
 
-# Build output
-dist/
+# Allow main folder
+!/main
 
-# Environment
-.env
-.env.local
-.env.*.local
+# Dependencies (inside main)
+main/node_modules/
+main/.venv/
+main/venv/
+
+# Build output (inside main)
+main/dist/
+
+# Environment (inside main)
+main/.env
+main/.env.local
+main/.env.*.local
 
 # Database
 *.db
@@ -34,3 +40,9 @@ Thumbs.db
 tmp/
 temp/
 *.tmp
+
+# Docs
+docs/
+Dashboard.md
+NEXUS_PRD_v3_Obsidian.md
+Newsflow_Coding_Plan.md
