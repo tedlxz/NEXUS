@@ -6,6 +6,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { vaultPaths } from '../config';
 import { companyTemplate } from '../vault/templates';
+import { getUserVaultPaths } from '../vault/writer';
 
 /**
  * Migrate companies - OBSIDIAN IS THE SOURCE OF TRUTH
@@ -19,7 +20,9 @@ import { companyTemplate } from '../vault/templates';
  *    - Only creates NEW company files for genuinely new companies
  * 4. Syncs everything from Obsidian to SQL database
  */
-export async function migrateCompanies(): Promise<void> {
+export async function migrateCompanies(userId?: string): Promise<void> {
+  // Use user-specific vault paths if userId is provided
+  const paths = userId ? getUserVaultPaths(userId) : vaultPaths;
   const db = getDb();
   const contactsRepo = new ContactsRepo(db);
   const companiesRepo = new CompaniesRepo(db);
@@ -27,7 +30,7 @@ export async function migrateCompanies(): Promise<void> {
   console.log('[Migrate] Starting company migration...');
 
   // Ensure companies directory exists
-  await fs.mkdir(vaultPaths.companies, { recursive: true });
+  await fs.mkdir(paths.companies, { recursive: true });
 
   // ── Step 1: Scan existing Company files ──
   // Build: companyNameSet (lowercase → canonical name), personToCompany (person name → company name)
@@ -35,7 +38,7 @@ export async function migrateCompanies(): Promise<void> {
   const personToCompany = new Map<string, string>();       // person name → company they're listed under
 
   try {
-    const companiesDir = vaultPaths.companies;
+    const companiesDir = paths.companies;
     const companyFiles = await fs.readdir(companiesDir);
 
     for (const file of companyFiles) {
@@ -86,7 +89,7 @@ export async function migrateCompanies(): Promise<void> {
   const orgReferences = new Map<string, Array<{ personName: string; personFile: string }>>();
 
   try {
-    const peopleDir = vaultPaths.people;
+    const peopleDir = paths.people;
     const peopleFiles = await fs.readdir(peopleDir);
 
     for (const file of peopleFiles) {
@@ -148,7 +151,7 @@ export async function migrateCompanies(): Promise<void> {
 
       for (const { personFile } of persons) {
         try {
-          const filePath = path.join(vaultPaths.people, personFile);
+          const filePath = path.join(paths.people, personFile);
           let content = await fs.readFile(filePath, 'utf-8');
 
           // Update current_org in YAML frontmatter
@@ -177,7 +180,7 @@ export async function migrateCompanies(): Promise<void> {
 
     // No rename detected — this is a genuinely new company. Create file.
     const safeName = orgName.replace(/[<>:"/\\|?*]/g, ' ');
-    const filePath = path.join(vaultPaths.companies, `${safeName}.md`);
+    const filePath = path.join(paths.companies, `${safeName}.md`);
 
     // Double-check file doesn't exist (by filename)
     try {
@@ -193,7 +196,7 @@ export async function migrateCompanies(): Promise<void> {
 
     for (const { personName, personFile } of persons) {
       try {
-        const content = await fs.readFile(path.join(vaultPaths.people, personFile), 'utf-8');
+        const content = await fs.readFile(path.join(paths.people, personFile), 'utf-8');
         const roleMatch = content.match(/current_role:\s*"?([^"\n]+)"?/m);
         relatedContacts.push({
           name: personName,

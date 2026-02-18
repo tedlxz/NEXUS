@@ -160,7 +160,8 @@ export function createBot(): Telegraf {
   });
 
   bot.command('migrate', async (ctx) => {
-    const result = await handleMigrateCompanies();
+    const userId = ctx.from.id;
+    const result = await handleMigrateCompanies(userId.toString());
     await ctx.reply(result);
   });
 

@@ -1420,11 +1420,11 @@ export async function handleDashboard(userId?: string): Promise<string> {
   }
 }
 
-export async function handleMigrateCompanies(): Promise<string> {
+export async function handleMigrateCompanies(userId?: string): Promise<string> {
   try {
     // Dynamic import to avoid circular dependencies
     const { migrateCompanies } = await import('../db/migrate-companies');
-    await migrateCompanies();
+    await migrateCompanies(userId);
     return `✅ 公司数据迁移完成！\n\n已处理现有联系人的公司信息：\n• 检测并修复了改名的公司（自动更新联系人文件）\n• 为新公司创建了 Obsidian 文件\n• 同步到 SQL 数据库\n\n使用 /dashboard 查看更新后的数据看板。`;
   } catch (err) {
     console.error('[Migrate Companies Error]', err);
