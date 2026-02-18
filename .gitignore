@@ -1,21 +1,15 @@
-# Only track the main folder and README
-/*
-!/main
-!/README.md
-!/install_launcher.sh
+# Dependencies
+node_modules/
+.venv/
+venv/
 
-# Dependencies (inside main)
-main/node_modules/
-main/.venv/
-main/venv/
+# Build output
+dist/
 
-# Build output (inside main)
-main/dist/
-
-# Environment (inside main)
-main/.env
-main/.env.local
-main/.env.*.local
+# Environment
+.env
+.env.local
+.env.*.local
 
 # Database
 *.db
@@ -41,8 +35,13 @@ tmp/
 temp/
 *.tmp
 
-# Docs
+# Docs (local only)
 docs/
 Dashboard.md
 NEXUS_PRD_v3_Obsidian.md
 Newsflow_Coding_Plan.md
+
+# Launcher build (not source)
+main/launcher/dist/
+main/launcher/node_modules/
+main/launcher/src-tauri/target/
