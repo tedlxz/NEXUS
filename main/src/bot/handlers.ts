@@ -18,15 +18,15 @@ import path from 'path';
 import fs from 'fs/promises';
 
 /** Refresh the Data Dashboard in the background (fire-and-forget) */
-function refreshDashboard(): void {
-  vaultWriter.saveDashboard().catch(err =>
+function refreshDashboard(userId?: string): void {
+  vaultWriter.saveDashboard(userId).catch(err =>
     console.error('[Dashboard] Auto-refresh failed:', err)
   );
 }
 
 /** Refresh the Starred list in the background (fire-and-forget) */
-function refreshStarredList(): void {
-  vaultWriter.saveStarredList().catch(err =>
+function refreshStarredList(userId?: string): void {
+  vaultWriter.saveStarredList(userId).catch(err =>
     console.error('[StarredList] Auto-refresh failed:', err)
   );
 }
@@ -93,14 +93,14 @@ export async function confirmPendingAction(userId: number): Promise<string> {
   pendingActions.delete(userId);
 
   if (pending.type === 'new_contact') {
-    return executeNewContact(pending.data as PersonData);
+    return executeNewContact(pending.data as PersonData, userId.toString());
   } else if (pending.type === 'log_conversation' || pending.type === 'transcript') {
-    return executeLogConversation(pending.data as ConversationData, pending.originalText);
+    return executeLogConversation(pending.data as ConversationData, pending.originalText, userId.toString());
   } else if (pending.type === 'transcript_contact_pending') {
     // This shouldn't happen - user should respond with contact name directly
     return '请告诉我联系人姓名。';
   } else if (pending.type === 'update_entity') {
-    return executeUpdateEntity(pending.data as { name: string; isCompany: boolean; changes: Record<string, unknown>; description: string });
+    return executeUpdateEntity(pending.data as { name: string; isCompany: boolean; changes: Record<string, unknown>; description: string }, userId.toString());
   }
 
   return 'Unknown action type.';
@@ -231,7 +231,7 @@ export async function handleMessage(text: string, userId: number): Promise<strin
     if (lower === '确认' || lower === '是' || lower === 'yes' || lower === 'y' || lower === '对' || lower === '对的') {
       // User confirmed - create person AND save transcript
       pendingActions.delete(userId);
-      return await executeNewContactWithTranscript(confirmData.personData, confirmData.conversationData);
+      return await executeNewContactWithTranscript(confirmData.personData, confirmData.conversationData, userId.toString());
     }
     
     if (lower === '否' || lower === 'no' || lower === 'n' || lower === '不是' || lower === '不对') {
@@ -421,12 +421,12 @@ async function handleNewContact(text: string, intent: IntentResult, userId: numb
   return preview;
 }
 
-async function executeNewContact(profileData: PersonData): Promise<string> {
+async function executeNewContact(profileData: PersonData, userId?: string): Promise<string> {
   // Run migration if needed before creating contact
   const db = getDb();
   runMigrationIfNeeded(db);
   
-  const filePath = await vaultWriter.createPerson(profileData);
+  const filePath = await vaultWriter.createPerson(profileData, userId);
 
   await indexManager.addOrUpdate({
     name: profileData.name,
@@ -454,8 +454,8 @@ async function executeNewContact(profileData: PersonData): Promise<string> {
     response += `\n⚠️ Contact saved but bot restart failed.`;
   }
 
-  refreshDashboard();
-  refreshStarredList();
+  refreshDashboard(userId);
+  refreshStarredList(userId);
   return response;
 }
 
@@ -531,12 +531,12 @@ async function handleLogConversation(text: string, intent: IntentResult, userId:
   return preview;
 }
 
-async function executeLogConversation(convData: ConversationData, originalText: string): Promise<string> {
+async function executeLogConversation(convData: ConversationData, originalText: string, userId?: string): Promise<string> {
   const contactName = convData.contact;
-  const filePath = await vaultWriter.createConversation(convData);
+  const filePath = await vaultWriter.createConversation(convData, userId);
   const convFileName = path.basename(filePath, '.md');
 
-  await vaultWriter.addConversationLink(contactName, filePath);
+  await vaultWriter.addConversationLink(contactName, filePath, userId);
 
   const summaryLine = `${convData.date}: ${convData.ai_summary?.slice(0, 100) || 'Conversation logged'}...`;
   const existingContact = await indexManager.findByName(contactName);
@@ -545,7 +545,7 @@ async function executeLogConversation(convData: ConversationData, originalText: 
     await indexManager.addConversationSummary(contactName, summaryLine);
   } else {
     const profileData = await parseProfile(contactName, originalText);
-    await vaultWriter.createPerson(profileData);
+    await vaultWriter.createPerson(profileData, userId);
     await indexManager.addOrUpdate({
       name: contactName,
       file: `People/${contactName}.md`,
@@ -650,8 +650,8 @@ async function executeLogConversation(convData: ConversationData, originalText: 
   
   response += `\n📁 ${path.basename(filePath)}`;
 
-  refreshDashboard();
-  refreshStarredList();
+  refreshDashboard(userId);
+  refreshStarredList(userId);
   return response;
 }
 
@@ -826,7 +826,8 @@ async function createContactAndSaveTranscript(
  */
 export async function executeNewContactWithTranscript(
   personData: PersonData,
-  conversationData: ConversationData
+  conversationData: ConversationData,
+  userId?: string
 ): Promise<string> {
   try {
     // Run migration if needed
@@ -834,7 +835,7 @@ export async function executeNewContactWithTranscript(
     runMigrationIfNeeded(db);
     
     // Step 1: Create person file
-    const filePath = await vaultWriter.createPerson(personData);
+    const filePath = await vaultWriter.createPerson(personData, userId);
     
     // Step 2: Add to index
     await indexManager.addOrUpdate({
@@ -849,7 +850,7 @@ export async function executeNewContactWithTranscript(
     });
 
     // Step 3: Save conversation/transcript
-    await executeLogConversation(conversationData, conversationData.raw_transcript || '');
+    await executeLogConversation(conversationData, conversationData.raw_transcript || '', userId);
     
     // Step 4: Restart bot to sync
     try {
@@ -866,7 +867,8 @@ export async function executeNewContactWithTranscript(
       response += `\n📝 对话摘要: ${conversationData.ai_summary.slice(100)}...`;
     }
 
-    refreshDashboard();
+    refreshDashboard(userId);
+    refreshStarredList(userId);
     return response;
 
   } catch (err) {
@@ -960,7 +962,7 @@ async function handleUpdateContact(text: string, intent: IntentResult, userId: n
   return preview + '\n\n确认修改？';
 }
 
-async function executeUpdateEntity(data: { name: string; isCompany: boolean; changes: Record<string, unknown>; description: string }): Promise<string> {
+async function executeUpdateEntity(data: { name: string; isCompany: boolean; changes: Record<string, unknown>; description: string }, userId?: string): Promise<string> {
   const { name, isCompany, changes } = data;
 
   if (isCompany) {
@@ -983,8 +985,8 @@ async function executeUpdateEntity(data: { name: string; isCompany: boolean; cha
 
     let response = `✅ 已更新 **${name}** 的公司信息。`;
 
-    refreshDashboard();
-    refreshStarredList();
+    refreshDashboard(userId);
+    refreshStarredList(userId);
     return response;
   }
 
@@ -1028,8 +1030,8 @@ async function executeUpdateEntity(data: { name: string; isCompany: boolean; cha
     response += ` ⚠️ 信息已保存但同步失败。`;
   }
 
-  refreshDashboard();
-  refreshStarredList();
+  refreshDashboard(userId);
+  refreshStarredList(userId);
   return response;
 }
 
@@ -1407,9 +1409,9 @@ export async function handleStatus(): Promise<string> {
   return response;
 }
 
-export async function handleDashboard(): Promise<string> {
+export async function handleDashboard(userId?: string): Promise<string> {
   try {
-    const filePath = await vaultWriter.saveDashboard();
+    const filePath = await vaultWriter.saveDashboard(userId);
     const fileName = filePath.split('/').pop();
     return `✅ Data Dashboard 已更新\n\n📁 文件: ${fileName}\n\n在 Obsidian 中打开查看完整表格。`;
   } catch (err) {
@@ -1487,7 +1489,7 @@ export async function handleExport(): Promise<string> {
 /**
  * Delete a contact from both Vault and Database
  */
-export async function handleDeleteContact(name: string): Promise<string> {
+export async function handleDeleteContact(name: string, userId?: string): Promise<string> {
   // Check if contact exists
   const existing = await indexManager.findByName(name);
   if (!existing) {
@@ -1517,7 +1519,7 @@ export async function handleDeleteContact(name: string): Promise<string> {
     response += `. ⚠️ Contact deleted but bot restart failed.`;
   }
 
-  refreshDashboard();
-  refreshStarredList();
+  refreshDashboard(userId);
+  refreshStarredList(userId);
   return response;
 }

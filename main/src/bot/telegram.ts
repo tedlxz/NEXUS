@@ -154,7 +154,8 @@ export function createBot(): Telegraf {
   });
 
   bot.command('dashboard', async (ctx) => {
-    const result = await handleDashboard();
+    const userId = ctx.from.id;
+    const result = await handleDashboard(userId.toString());
     await ctx.reply(result);
   });
 
@@ -198,6 +199,7 @@ export function createBot(): Telegraf {
 
   bot.command('delete', async (ctx) => {
     const query = ctx.message.text.replace(/^\/delete\s*/, '').trim();
+    const userId = ctx.from.id;
     if (!query) {
       await ctx.reply(
         '用法: /delete <联系人姓名>\n\n' +
@@ -210,7 +212,7 @@ export function createBot(): Telegraf {
     }
     try {
       await ctx.sendChatAction('typing');
-      const result = await handleDeleteContact(query);
+      const result = await handleDeleteContact(query, userId.toString());
       await ctx.reply(result, { parse_mode: 'Markdown' });
     } catch (err) {
       console.error('[Delete Error]', err);

@@ -1,6 +1,6 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { vaultPaths, PersonData, ConversationData, ResearchData } from '../config';
+import { config, vaultPaths, PersonData, ConversationData, ResearchData } from '../config';
 import {
   personTemplate,
   conversationTemplate,
@@ -9,6 +9,35 @@ import {
   dailyNoteEntry,
   companyTemplate,
 } from './templates';
+
+/** Get vault paths for a specific user */
+export function getUserVaultPaths(userId: string) {
+  const vaultBase = config.vault.getVaultPath(userId);
+  return {
+    people: path.join(vaultBase, 'People'),
+    conversations: path.join(vaultBase, 'Conversations'),
+    companies: path.join(vaultBase, 'Companies'),
+    research: path.join(vaultBase, 'Research'),
+    daily: path.join(vaultBase, 'Daily'),
+    templates: path.join(vaultBase, 'Templates'),
+    raw: path.join(vaultBase, '_raw'),
+    system: path.join(vaultBase, '_system'),
+    database: path.join(vaultBase, '_system', 'nexus.db'),
+  };
+}
+
+/** Ensure vault folders exist for a specific user */
+export async function ensureUserVaultFolders(userId: string): Promise<void> {
+  const paths = getUserVaultPaths(userId);
+  await ensureDir(paths.people);
+  await ensureDir(paths.conversations);
+  await ensureDir(paths.companies);
+  await ensureDir(paths.research);
+  await ensureDir(paths.daily);
+  await ensureDir(paths.templates);
+  await ensureDir(paths.raw);
+  await ensureDir(paths.system);
+}
 
 async function ensureDir(dirPath: string): Promise<void> {
   await fs.mkdir(dirPath, { recursive: true });
@@ -45,15 +74,17 @@ async function fileExists(filePath: string): Promise<boolean> {
 }
 
 export class VaultWriter {
-  async createPerson(data: PersonData): Promise<string> {
-    const filePath = path.join(vaultPaths.people, `${data.name}.md`);
+  async createPerson(data: PersonData, userId?: string): Promise<string> {
+    const paths = userId ? getUserVaultPaths(userId) : vaultPaths;
+    const filePath = path.join(paths.people, `${data.name}.md`);
     const content = personTemplate(data);
     await atomicWrite(filePath, content);
     return filePath;
   }
 
-  async updatePerson(name: string, updates: Partial<PersonData>): Promise<void> {
-    const filePath = path.join(vaultPaths.people, `${name}.md`);
+  async updatePerson(name: string, updates: Partial<PersonData>, userId?: string): Promise<void> {
+    const paths = userId ? getUserVaultPaths(userId) : vaultPaths;
+    const filePath = path.join(paths.people, `${name}.md`);
     const exists = await fileExists(filePath);
     if (!exists) {
       // Create new if doesn't exist
@@ -93,28 +124,31 @@ export class VaultWriter {
     await atomicWrite(filePath, newContent);
   }
 
-  async createConversation(data: ConversationData): Promise<string> {
+  async createConversation(data: ConversationData, userId?: string): Promise<string> {
+    const paths = userId ? getUserVaultPaths(userId) : vaultPaths;
     const fileName = `${data.date} ${data.contact} ${data.source}.md`;
-    const filePath = path.join(vaultPaths.conversations, fileName);
+    const filePath = path.join(paths.conversations, fileName);
     const content = conversationTemplate(data);
     await atomicWrite(filePath, content);
 
     // Save raw transcript if provided
     if (data.raw_transcript) {
-      await this.saveRawTranscript(data.contact, data.date, data.raw_transcript);
+      await this.saveRawTranscript(data.contact, data.date, data.raw_transcript, userId);
     }
 
     return filePath;
   }
 
-  async saveRawTranscript(contactName: string, date: string, content: string): Promise<string> {
-    const filePath = path.join(vaultPaths.raw, `${date} ${contactName}.txt`);
+  async saveRawTranscript(contactName: string, date: string, content: string, userId?: string): Promise<string> {
+    const paths = userId ? getUserVaultPaths(userId) : vaultPaths;
+    const filePath = path.join(paths.raw, `${date} ${contactName}.txt`);
     await atomicWrite(filePath, content);
     return filePath;
   }
 
-  async createResearch(data: ResearchData): Promise<string> {
-    const filePath = path.join(vaultPaths.research, `${data.topic}.md`);
+  async createResearch(data: ResearchData, userId?: string): Promise<string> {
+    const paths = userId ? getUserVaultPaths(userId) : vaultPaths;
+    const filePath = path.join(paths.research, `${data.topic}.md`);
     const content = researchTemplate(data);
     await atomicWrite(filePath, content);
     return filePath;
@@ -135,8 +169,9 @@ export class VaultWriter {
     }
   }
 
-  async addConversationLink(contactName: string, conversationFile: string): Promise<void> {
-    const filePath = path.join(vaultPaths.people, `${contactName}.md`);
+  async addConversationLink(contactName: string, conversationFile: string, userId?: string): Promise<void> {
+    const paths = userId ? getUserVaultPaths(userId) : vaultPaths;
+    const filePath = path.join(paths.people, `${contactName}.md`);
     const exists = await fileExists(filePath);
     if (!exists) return;
 
@@ -174,16 +209,18 @@ export class VaultWriter {
     }
   }
 
-  async saveDashboard(): Promise<string> {
-    const dashboard = await generateDataDashboard();
-    const filePath = path.join(vaultPaths.system, 'Data Dashboard.md');
+  async saveDashboard(userId?: string): Promise<string> {
+    const paths = userId ? getUserVaultPaths(userId) : vaultPaths;
+    const dashboard = await generateDataDashboard(userId);
+    const filePath = path.join(paths.system, 'Data Dashboard.md');
     await atomicWrite(filePath, dashboard);
     return filePath;
   }
 
-  async saveStarredList(): Promise<string> {
-    const starredMd = await generateStarredList();
-    const filePath = path.join(vaultPaths.system, 'Starred.md');
+  async saveStarredList(userId?: string): Promise<string> {
+    const paths = userId ? getUserVaultPaths(userId) : vaultPaths;
+    const starredMd = await generateStarredList(userId);
+    const filePath = path.join(paths.system, 'Starred.md');
     await atomicWrite(filePath, starredMd);
     return filePath;
   }
@@ -198,7 +235,8 @@ export class VaultWriter {
     starred?: boolean,
     listed?: boolean,
     market?: 'us' | 'cn' | 'hk' | 'jp' | 'kr',
-    ticker?: string
+    ticker?: string,
+    userId?: string
   ): Promise<string> {
     // Sanitize company name for filename (remove invalid characters)
     const safeName = companyName.replace(/[<>:"/\\|?*]/g, ' ');
@@ -220,9 +258,10 @@ export class VaultWriter {
   }
 
   /** Update specific fields of an existing company file */
-  async updateCompany(companyName: string, changes: Record<string, unknown>): Promise<void> {
+  async updateCompany(companyName: string, changes: Record<string, unknown>, userId?: string): Promise<void> {
+    const paths = userId ? getUserVaultPaths(userId) : vaultPaths;
     const safeName = companyName.replace(/[<>:"/\\|?*]/g, ' ');
-    const filePath = path.join(vaultPaths.companies, `${safeName}.md`);
+    const filePath = path.join(paths.companies, `${safeName}.md`);
     const exists = await fileExists(filePath);
     if (!exists) {
       console.error(`[UpdateCompany] File not found: ${filePath}`);
@@ -275,11 +314,13 @@ export class VaultWriter {
     companyName: string,
     conversationDate: string,
     contactName: string,
-    summary: string
+    summary: string,
+    userId?: string
   ): Promise<void> {
+    const paths = userId ? getUserVaultPaths(userId) : vaultPaths;
     // Sanitize company name for filename
     const safeName = companyName.replace(/[<>:"/\\|?*]/g, ' ');
-    const filePath = path.join(vaultPaths.companies, `${safeName}.md`);
+    const filePath = path.join(paths.companies, `${safeName}.md`);
     try {
       const existing = await this.readFile(filePath);
       if (existing) {
@@ -290,7 +331,7 @@ export class VaultWriter {
       }
     } catch {
       // File doesn't exist, create new one
-      await this.createOrUpdateCompany(companyName, [], [{ date: conversationDate, contact: contactName, summary }]);
+      await this.createOrUpdateCompany(companyName, [], [{ date: conversationDate, contact: contactName, summary }], undefined, undefined, undefined, undefined, undefined, undefined, userId);
     }
   }
 }
@@ -328,11 +369,12 @@ function escapeRegex(str: string): string {
 }
 
 /** Generate Starred list with all starred people and companies */
-async function generateStarredList(): Promise<string> {
+async function generateStarredList(userId?: string): Promise<string> {
   const { getDb } = await import('../db/database');
   const { ContactsRepo } = await import('../db/contacts-repo');
   const { CompaniesRepo } = await import('../db/companies-repo');
 
+  // For now, use shared database. Per-user database can be implemented later.
   const db = getDb();
   const contactsRepo = new ContactsRepo(db);
   const companiesRepo = new CompaniesRepo(db);
@@ -372,7 +414,8 @@ async function generateStarredList(): Promise<string> {
 }
 
 /** Generate Data Dashboard with all contacts and companies in a table format */
-export async function generateDataDashboard(): Promise<string> {
+export async function generateDataDashboard(userId?: string): Promise<string> {
+  // For now, use shared database. Per-user database can be implemented later.
   const { getDb } = await import('../db/database');
   const { ContactsRepo } = await import('../db/contacts-repo');
   const { ConversationsRepo } = await import('../db/conversations-repo');
