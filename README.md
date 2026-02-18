@@ -1,11 +1,12 @@
 # NEXUS CRM
 
-> Personal Network Management for PE Professionals
+> Personal Network Management for Private Equity Professionals
 
 ![Version](https://img.shields.io/badge/version-0.3.0-blue)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-green)
+![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
-NEXUS is a personal CRM system that combines a Telegram Bot with an Obsidian Vault. It helps you manage your professional network with AI-powered features.
+NEXUS is a personal CRM system that combines a Telegram Bot with an Obsidian Vault. It helps you manage your professional network with AI-powered features, designed specifically for private equity professionals who need to track relationships, companies, and investment opportunities.
 
 ## Why NEXUS?
 
@@ -13,76 +14,111 @@ Traditional CRM systems are:
 - ❌ Too complex for personal use
 - ❌ Require manual data entry
 - ❌ Don't integrate with your note-taking workflow
+- ❌ Expensive and overkill for individual investors
 
 NEXUS solves this by:
-- ✅ Using Telegram as the interface (you're already here)
-- ✅ Storing data in Obsidian (your second brain)
-- ✅ AI-powered insights and automation
+- ✅ Using **Telegram** as the interface (you're already here)
+- ✅ Storing data in **Obsidian** (your second brain, fully customizable)
+- ✅ AI-powered insights, summaries, and automation
+- ✅ Free and open-source
 
 ## Features
 
 ### 🖥️ NEXUS Launcher (macOS App)
-桌面启动器，一键启动 NEXUS 服务：
-- 简洁的 macOS 原生应用
-- 自动检测并启动 Telegram Bot
-- 状态指示（运行中/已停止）
-- 支持 PM2 服务管理
+A native macOS application to manage your NEXUS service:
+
+- One-click start/stop for NEXUS service
+- Real-time status indicator (running/stopped)
+- Built-in PM2 service management
+- Clean, native macOS interface
+- App icon customization support
 
 ### 🤖 Telegram Bot
-Control everything from Telegram:
-- Add/manage contacts
-- Log conversations
-- Track action items
-- Trigger AI analysis
+Control everything from Telegram - the interface you already use daily:
 
-Commands:
-- `/start` - Initialize bot
-- `/add [name]` - Add new contact
-- `/pending` - View action items
-- `/followup` - People to reconnect with
-- `/newsflow` - Get AI-curated news
+**Contact Management:**
+- Add new contacts with AI-extracted details
+- Update contact information
+- Star/favorite important contacts
+- Search and filter by tags, industries, companies
+
+**Conversation Logging:**
+- Log meetings, calls, and interactions
+- AI-generated summaries and key insights
+- Extract action items automatically
+- Link conversations to contacts and companies
+
+**Commands:**
+- `/start` - Initialize bot and sync data
+- `/add [name]` - Add new contact (AI assists)
+- `/log [contact]` - Log a conversation
+- `/pending` - View all action items
+- `/followup` - People you should reconnect with
+- `/newsflow` - Get AI-curated daily news
+- `/dashboard` - View network statistics
+- `/starred` - View starred contacts and companies
 
 ### 📇 Contact Management
-- Store contact details (name, role, company, how you met)
-- Track relationship closeness
-- Tag by industries/interests
-- Link to company profiles
+Store comprehensive contact profiles:
+- Name, role, company
+- How you met (source)
+- Relationship closeness level
+- Industries and tags
+- Career history
+- Personal notes
+
+### 🏢 Company Tracking
+Track companies in your network:
+- Company profiles with industry, description
+- List of related contacts (current/past)
+- Linked conversations
+- Star companies for news monitoring
+- Support for public/private companies
+- Stock ticker for public companies
 
 ### 💬 Conversation Logging
-Record conversations with:
-- Date, location, occasion
+Record conversations with full context:
+- Date, time, location, occasion
 - AI-generated summaries
-- Key topics & insights
-- Action items
-- Related companies/people
+- Key topics and insights
+- Action items with owners and due dates
+- Related companies and people
+- Sentiment and relationship signals
 
 ### 📰 Newsflow (AI News Monitor)
-Automated news monitoring for your network:
+Automated news monitoring powered by AI:
 
 **What it monitors:**
-- Starred companies (listed & private)
-- Starred people
+- Starred companies (public and private)
+- Starred people in your network
+
+**News Sources:**
+- Finnhub API (US stocks)
+- AKShare (HK/CN stocks)
+- Google News RSS (private companies, people)
 
 **What it delivers:**
-- Daily AI-curated briefing
+- Daily AI-curated briefing at 9:00 AM
 - Filters out noise (price movements, trading signals)
 - Prioritizes: fundamentals, leadership changes, product launches, M&A
 
-**Smart matching:**
-- Matches news to related people in your network
-- Recommends contacts based on news
+**Smart Matching:**
+- Automatically matches news to related people
+- Suggests contacts based on news relevance
 
 ### 🔗 Relationship Intelligence
 - Automatically link contacts to companies
-- Suggest people to reconnect with
-- Track relationship signals (strengthening/cooling)
+- Track relationship signals (strengthening/stable/cooling)
+- Suggest people to reconnect with based on last contact
+- Industry distribution analysis
 
 ### 📊 Dashboard
-View your network at a glance:
-- Total contacts by closeness
+View your entire network at a glance:
+- Total contacts by closeness level
 - Recent conversations
 - Upcoming follow-ups
 - Industry distribution
+- Company coverage
 
 ## Architecture
 
@@ -95,80 +131,202 @@ View your network at a glance:
                             ▼
                      ┌──────────────┐
                      │   SQLite DB  │
-                     │  (Cache)     │
+                     │  (Cache/FTS)│
                      └──────────────┘
                             │
                             ▼
                      ┌──────────────┐
-                     │  MiniMax AI │
-                     │ (Analysis)  │
+                     │  MiniMax AI  │
+                     │ (Analysis)   │
                      └──────────────┘
 ```
 
 ### Data Flow
 
-1. **You** interact with Telegram Bot
-2. **Bot** processes request, reads/writes to **Obsidian Vault**
-3. **SQLite** caches data for fast search
-4. **AI** generates summaries and insights
+1. **You** send a command or message to the Telegram Bot
+2. **Bot** processes the request using AI when needed
+3. **Bot** reads from or writes to your **Obsidian Vault** (Markdown files)
+4. **SQLite** caches data for fast full-text search
+5. **AI** generates summaries, extracts insights, and curates news
+
+### Real-time Sync
+
+NEXUS uses a file watcher to keep Obsidian and SQLite in sync:
+- Changes in Obsidian → automatically sync to SQLite
+- Changes via Telegram → automatically update Obsidian
+- Dashboard and Starred lists auto-refresh on any change
 
 ## Quick Start
 
+### Option 1: NEXUS Launcher (Recommended for macOS)
+
+1. Download `NEXUS Launcher.app` from the `main/launcher/` folder
+2. Run the app
+3. Enter your **User ID** (get from @userinfobot)
+4. Enter your **MiniMax API Key**
+5. Confirm or customize your Obsidian Vault path
+6. Click Start
+
+### Option 2: Command Line
+
 ```bash
-# Clone
+# Clone the repository
 git clone https://github.com/tedlxz/NEXUS.git
 cd NEXUS/main
 
-# Install
-chmod +x install.sh
-./install.sh
-
-# Or manually:
+# Copy and edit configuration
 cp .env.example .env
+nano .env  # Or use any text editor
+
+# Install dependencies and build
 npm install
 npm run build
-npm start
+
+# Start the service
+npm start  # Uses PM2 for process management
 ```
 
-## Setup
+### Configuration
 
-### Required
-1. **Telegram Bot** - Get from @BotFather
-2. **Telegram Chat ID** - Get from @userinfobot
-3. **MiniMax API Key** - For AI features
-4. **Obsidian Vault** - Path to your vault
+Create a `.env` file with the following:
 
-### Optional
-- **Telegram Proxy** - For China users (auto-detected)
-- **Finnhub API** - For US stock news
-- **AKShare** - For HK/CN stock news
+```bash
+# Telegram Bot (pre-configured - just press enter)
+TELEGRAM_BOT_TOKEN=8370700502:AAHp0RhLFREFqGmed8Xmd2pGy9NB9IcUMVM
+
+# Your User ID (REQUIRED - get from @userinfobot)
+AUTHORIZED_USER_IDS=your_user_id_here
+
+# MiniMax API Key (REQUIRED - get from https://platform.minimax.io)
+MINIMAX_API_KEY=your_minimax_api_key_here
+
+# Obsidian Vault Path (optional, defaults to iCloud Obsidian)
+VAULT_PATH=/path/to/your/Nexus-Vault
+
+# Telegram Proxy (optional, for China users)
+TELEGRAM_PROXY=http://127.0.0.1:7890
+
+# Newsflow Chat ID (optional, defaults to AUTHORIZED_USER_IDS)
+NEWSFLOW_CHAT_ID=your_user_id_here
+```
+
+### Getting Your User ID
+
+1. Open Telegram
+2. Search for **@userinfobot**
+3. Start the bot
+4. It will display your User ID (a number like `123456789`)
+
+### Getting MiniMax API Key
+
+1. Go to [MiniMax Platform](https://platform.minimax.io)
+2. Sign up or log in
+3. Create an API key
+4. Copy the key to your `.env` file
+
+## Obsidian Vault Setup
+
+NEXUS expects your Obsidian Vault to have the following folder structure:
+
+```
+Nexus-Vault/
+├── People/           # Contact notes
+├── Companies/        # Company notes
+├── Conversations/    # Meeting notes
+├── Research/         # Research notes
+├── Daily/            # Daily notes
+├── Templates/        # NEXUS templates
+├── NewsFlow/        # AI news briefings
+├── _raw/            # Raw transcripts
+├── _system/         # NEXUS system files
+│   ├── nexus.db     # SQLite cache
+│   ├── Starred.md   # Starred list
+│   └── Data Dashboard.md
+└── Templates/       # Note templates
+```
+
+**Note:** NEXUS will automatically create these folders if they don't exist.
+
+## Commands Reference
+
+| Command | Description |
+|---------|-------------|
+| `/start` | Initialize bot, sync data from Obsidian |
+| `/help` | Show available commands |
+| `/add [name]` | Add a new contact |
+| `/log [contact]` | Log a conversation with a contact |
+| `/pending` | List all pending action items |
+| `/followup` | List contacts to reconnect with |
+| `/newsflow` | Trigger newsflow manually |
+| `/dashboard` | View network statistics |
+| `/starred` | View starred contacts and companies |
+| `/search [query]` | Search contacts and companies |
+| `/company [name]` | View company details |
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|------------|
-| Interface | Telegram Bot |
+| Interface | Telegram Bot (Telegraf) |
 | Runtime | Node.js 18+ |
 | Language | TypeScript |
-| Database | SQLite |
+| Database | SQLite (better-sqlite3) |
 | AI | MiniMax API |
-| Storage | Obsidian Vault |
-| News | Finnhub, AKShare, Google News |
+| Storage | Obsidian Vault (Markdown) |
+| File Watcher | Chokidar |
+| Process Manager | PM2 |
+| macOS App | Tauri 2.x |
 
 ## Project Structure
 
 ```
-main/
-├── src/
-│   ├── bot/           # Telegram bot handlers
-│   ├── db/            # Database layer
-│   ├── newsflow/      # News monitoring
-│   ├── vault/         # Obsidian integration
-│   ├── ai/            # AI prompts & logic
-│   └── web/           # Dashboard
-├── install.sh         # One-click installer
-└── .env.example       # Config template
+NEXUS/
+├── main/
+│   ├── src/
+│   │   ├── bot/           # Telegram bot handlers
+│   │   ├── db/            # SQLite database layer
+│   │   ├── newsflow/      # News monitoring
+│   │   ├── vault/         # Obsidian integration
+│   │   ├── ai/            # AI prompts & logic
+│   │   └── web/           # Web dashboard
+│   ├── dist/              # Compiled JavaScript
+│   ├── launcher/          # NEXUS Launcher (Tauri)
+│   │   ├── src/           # React frontend
+│   │   └── src-tauri/     # Rust backend
+│   ├── install.sh         # Legacy installer
+│   ├── ecosystem.config.js # PM2 config
+│   └── .env.example       # Config template
+├── install_launcher.sh    # Quick installer script
+├── docs/                  # Documentation
+└── README.md
 ```
+
+## Troubleshooting
+
+### Bot not responding
+
+1. Check if NEXUS is running: `pm2 status`
+2. Check logs: `pm2 logs nexus`
+3. Restart: `pm2 restart nexus`
+
+### Obsidian sync issues
+
+1. Make sure iCloud is syncing your vault
+2. Check the vault path in `.env`
+3. Verify folder permissions
+
+### Newsflow not working
+
+1. Check API keys (MiniMax, Finnhub)
+2. Verify `NEWSFLOW_CHAT_ID` is set
+3. Check newsflow logs: look for `[Newsflow]` in `pm2 logs`
+
+### Database errors
+
+NEXUS will automatically run migrations on startup. If you see migration errors:
+1. Backup your vault
+2. Delete `nexus.db` in `_system/`
+3. Restart NEXUS to rebuild
 
 ## License
 
@@ -177,15 +335,23 @@ Private - All rights reserved
 ## Changelog
 
 ### v0.3.0 (2026-02-18)
-- 新增 NEXUS Launcher macOS 桌面应用
-- 新增 `install_launcher.sh` 一键安装脚本
-- 支持 PM2 服务管理
-- 增强 .env 配置检测与交互式配置向导
+- Added NEXUS Launcher macOS native application
+- Added `install_launcher.sh` one-click installer
+- Enhanced PM2 service management
+- Auto-refresh Dashboard and Starred lists on changes
+- Fixed hardcoded paths for multi-user support
+- Added default Telegram Bot Token (pre-configured)
+- Fixed company deletion sync issues
 
 ### v0.2.2 (2026-02-18)
-- Initial release with Telegram bot
-- Contact management via Telegram
+- Initial public release
+- Telegram bot with contact management
 - Conversation logging with AI summaries
 - Newsflow AI news monitoring
 - Obsidian vault integration
-- SQLite caching layer
+- SQLite caching layer with full-text search
+- Real-time file watcher for sync
+
+---
+
+**Need help?** Open an issue on GitHub or check the docs folder for more details.
