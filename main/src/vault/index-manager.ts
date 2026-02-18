@@ -1,5 +1,5 @@
 import { ContactIndexEntry } from '../config';
-import { getDb } from '../db/database';
+import { getDb, getUserDb } from '../db/database';
 import { ContactsRepo } from '../db/contacts-repo';
 import { SearchService, extractKeywords } from '../db/search';
 
@@ -12,12 +12,22 @@ export interface BrainstormFilter {
 }
 
 export class IndexManager {
+  private userId?: string;
+  
+  constructor(userId?: string) {
+    this.userId = userId;
+  }
+  
+  private get db() {
+    return this.userId ? getUserDb(this.userId) : getDb();
+  }
+
   private get contacts(): ContactsRepo {
-    return new ContactsRepo(getDb());
+    return new ContactsRepo(this.db);
   }
 
   private get searchService(): SearchService {
-    return new SearchService(getDb());
+    return new SearchService(this.db);
   }
 
   async getAll(): Promise<ContactIndexEntry[]> {
@@ -72,4 +82,10 @@ export class IndexManager {
   }
 }
 
+// Default index manager (for backward compatibility)
 export const indexManager = new IndexManager();
+
+/** Create a user-specific IndexManager */
+export function getIndexManager(userId?: string): IndexManager {
+  return new IndexManager(userId);
+}

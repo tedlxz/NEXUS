@@ -33,6 +33,10 @@ export const config = {
       ),
     // Get vault path for a specific user ID
     getVaultPath: function(userId: string): string {
+      // If no userId or empty, use default
+      if (!userId) {
+        return this.path;
+      }
       const userVaultKey = `VAULT_PATH_${userId}`;
       return process.env[userVaultKey] || this.path;
     },

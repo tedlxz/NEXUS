@@ -1,5 +1,5 @@
-import { vaultWriter } from '../vault/writer';
-import { indexManager } from '../vault/index-manager';
+import { vaultWriter, getUserVaultPaths } from '../vault/writer';
+import { indexManager, getIndexManager } from '../vault/index-manager';
 import { actionItemsManager } from '../vault/action-items';
 import { classifyIntent, IntentResult } from '../ai/intent';
 import { parseProfile } from '../ai/profile';
@@ -1035,19 +1035,20 @@ async function executeUpdateEntity(data: { name: string; isCompany: boolean; cha
   return response;
 }
 
-export async function handleBrainstormCommand(query: string): Promise<string> {
-  return runBrainstorm(query, query);
+export async function handleBrainstormCommand(query: string, userId?: string): Promise<string> {
+  return runBrainstorm(query, query, userId);
 }
 
-async function handleBrainstorm(text: string, intent: IntentResult): Promise<string> {
+async function handleBrainstorm(text: string, intent: IntentResult, userId?: string): Promise<string> {
   const topic = (intent.extracted_data.topic as string) || text;
   const description = (intent.extracted_data.description as string) || text;
-  return runBrainstorm(topic, description);
+  return runBrainstorm(topic, description, userId);
 }
 
-async function runBrainstorm(topic: string, description: string): Promise<string> {
+async function runBrainstorm(topic: string, description: string, userId?: string): Promise<string> {
   const keywords = extractKeywords(`${topic} ${description}`);
-  const contactIndex = await indexManager.getIndexForAI({
+  const userIndex = getIndexManager(userId);
+  const contactIndex = await userIndex.getIndexForAI({
     topic,
     keywords,
     limit: 30,
@@ -1481,8 +1482,9 @@ export async function handleFollowUp(): Promise<string> {
   return response;
 }
 
-export async function handleExport(): Promise<string> {
-  const indexJson = await indexManager.getIndexForAI();
+export async function handleExport(userId?: string): Promise<string> {
+  const userIndex = getIndexManager(userId);
+  const indexJson = await userIndex.getIndexForAI();
   return `📤 **Contact Index Export**\n\`\`\`json\n${indexJson}\n\`\`\``;
 }
 

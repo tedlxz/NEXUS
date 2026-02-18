@@ -120,6 +120,7 @@ export function createBot(): Telegraf {
 
   bot.command('brainstorm', async (ctx) => {
     const query = ctx.message.text.replace(/^\/brainstorm\s*/, '').trim();
+    const userId = ctx.from.id.toString();
     if (!query) {
       await ctx.reply(
         '用法: /brainstorm <话题>\n\n' +
@@ -132,7 +133,7 @@ export function createBot(): Telegraf {
     }
     try {
       await ctx.sendChatAction('typing');
-      const result = await handleBrainstormCommand(query);
+      const result = await handleBrainstormCommand(query, userId);
       await sendReply(ctx, result);
     } catch (err) {
       console.error('[Brainstorm Error]', err);
@@ -141,7 +142,8 @@ export function createBot(): Telegraf {
   });
 
   bot.command('export', async (ctx) => {
-    const result = await handleExport();
+    const userId = ctx.from.id.toString();
+    const result = await handleExport(userId);
     // Split if too long for Telegram
     if (result.length > 4000) {
       const chunks = splitMessage(result, 4000);
