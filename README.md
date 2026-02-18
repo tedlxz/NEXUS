@@ -2,7 +2,7 @@
 
 > Personal Network Management for PE Professionals
 
-![Version](https://img.shields.io/badge/version-0.2.2-blue)
+![Version](https://img.shields.io/badge/version-0.3.0-blue)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-green)
 
 NEXUS is a personal CRM system that combines a Telegram Bot with an Obsidian Vault. It helps you manage your professional network with AI-powered features.
@@ -20,6 +20,13 @@ NEXUS solves this by:
 - ✅ AI-powered insights and automation
 
 ## Features
+
+### 🖥️ NEXUS Launcher (macOS App)
+桌面启动器，一键启动 NEXUS 服务：
+- 简洁的 macOS 原生应用
+- 自动检测并启动 Telegram Bot
+- 状态指示（运行中/已停止）
+- 支持 PM2 服务管理
 
 ### 🤖 Telegram Bot
 Control everything from Telegram:
@@ -168,6 +175,12 @@ main/
 Private - All rights reserved
 
 ## Changelog
+
+### v0.3.0 (2026-02-18)
+- 新增 NEXUS Launcher macOS 桌面应用
+- 新增 `install_launcher.sh` 一键安装脚本
+- 支持 PM2 服务管理
+- 增强 .env 配置检测与交互式配置向导
 
 ### v0.2.2 (2026-02-18)
 - Initial release with Telegram bot
