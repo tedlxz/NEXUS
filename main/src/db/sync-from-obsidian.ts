@@ -6,6 +6,7 @@ import { ContactsRepo } from './contacts-repo';
 import { CompaniesRepo } from './companies-repo';
 import { ConversationsRepo } from './conversations-repo';
 import { vaultPaths } from '../config';
+import { vaultWriter } from '../vault/writer';
 
 /**
  * Sync Obsidian vault changes back to SQL database.
@@ -137,6 +138,11 @@ export async function syncFromObsidian(): Promise<{
   }
 
   console.log(`[Sync] Complete: ${contactsUpdated} contacts synced, ${contactsDeleted} deleted; ${companiesUpdated} companies synced, ${companiesDeleted} deleted`);
+  
+  // Regenerate Starred.md and Data Dashboard after sync
+  await vaultWriter.saveStarredList();
+  await vaultWriter.saveDashboard();
+  
   return { contactsUpdated, contactsDeleted, companiesUpdated, companiesDeleted, conversationsUpdated };
 }
 

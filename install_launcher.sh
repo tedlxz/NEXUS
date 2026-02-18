@@ -137,6 +137,17 @@ setup_env() {
         read -r key
         [ -n "$key" ] && sed -i '' "s|MINIMAX_API_KEY=.*|MINIMAX_API_KEY=$key|" .env
         
+        # Vault Path
+        default_vault="$HOME/Library/Mobile Documents/iCloud~md~obsidian/Documents/Nexus-Vault"
+        echo -n "4. Obsidian Vault 路径 (直接回车使用默认): "
+        read -r vault_path
+        if [ -z "$vault_path" ]; then
+            vault_path="$default_vault"
+        fi
+        # 转义路径中的空格
+        vault_path_escaped=$(echo "$vault_path" | sed 's/ /\\ /g')
+        sed -i '' "s|VAULT_PATH=.*|VAULT_PATH=$vault_path_escaped|" .env
+        
         print_success "配置已保存"
     else
         print_success "所有必填配置已就绪"

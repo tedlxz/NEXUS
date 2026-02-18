@@ -8,6 +8,7 @@ import { brainstorm } from '../ai/brainstorm';
 import { resolveContactFuzzy, summarizeConversationHistory } from '../ai/query';
 import { config, vaultPaths, ConversationData, PersonData } from '../config';
 import { getDb } from '../db/database';
+import { runMigrationIfNeeded } from '../db/migrate';
 import { ConversationsRepo } from '../db/conversations-repo';
 import { ContactsRepo } from '../db/contacts-repo';
 import { extractKeywords } from '../db/search';
@@ -406,6 +407,10 @@ async function handleNewContact(text: string, intent: IntentResult, userId: numb
 }
 
 async function executeNewContact(profileData: PersonData): Promise<string> {
+  // Run migration if needed before creating contact
+  const db = getDb();
+  runMigrationIfNeeded(db);
+  
   const filePath = await vaultWriter.createPerson(profileData);
 
   await indexManager.addOrUpdate({
@@ -712,6 +717,10 @@ async function createContactAndSaveTranscript(
   userId: number
 ): Promise<string> {
   try {
+    // Run migration if needed
+    const db = getDb();
+    runMigrationIfNeeded(db);
+    
     // Step 1: Extract contact info from user's description using AI
     const profileData = await parseProfile('', userDescription);
     
@@ -805,6 +814,10 @@ export async function executeNewContactWithTranscript(
   conversationData: ConversationData
 ): Promise<string> {
   try {
+    // Run migration if needed
+    const db = getDb();
+    runMigrationIfNeeded(db);
+    
     // Step 1: Create person file
     const filePath = await vaultWriter.createPerson(personData);
     
