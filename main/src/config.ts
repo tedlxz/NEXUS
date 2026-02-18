@@ -26,7 +26,7 @@ export const config = {
   vault: {
     path: process.env.VAULT_PATH ||
       path.join(
-        process.env.HOME || '/Users/tedliu',
+        process.env.HOME || '',
         'Library/Mobile Documents/iCloud~md~obsidian/Documents/Nexus-Vault'
       ),
   },

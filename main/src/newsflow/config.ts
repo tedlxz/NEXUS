@@ -38,7 +38,7 @@ export const newsflowConfig = {
   // Telegram Bot
   telegram: {
     botToken: requireEnv('TELEGRAM_BOT_TOKEN'),
-    chatId: process.env.NEWSFLOW_CHAT_ID || '6573965713',
+    chatId: process.env.NEWSFLOW_CHAT_ID || process.env.AUTHORIZED_USER_IDS || '',
     proxy: process.env.TELEGRAM_PROXY || '',
   },
 
@@ -46,7 +46,7 @@ export const newsflowConfig = {
   vault: {
     path: process.env.VAULT_PATH ||
       path.join(
-        process.env.HOME || '/Users/tedliu',
+        process.env.HOME || '',
         'Library/Mobile Documents/iCloud~md~obsidian/Documents/Nexus-Vault'
       ),
     newsflowFolder: 'NewsFlow',
