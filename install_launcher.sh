@@ -122,13 +122,13 @@ setup_env() {
         echo "或在此输入配置（直接回车跳过）:"
         echo ""
         
-        # Token
-        echo -n "1. Telegram Bot Token: "
+        # Token (pre-configured, just press enter)
+        echo -n "1. Telegram Bot Token (直接回车使用默认): "
         read -r token
         [ -n "$token" ] && sed -i '' "s|TELEGRAM_BOT_TOKEN=.*|TELEGRAM_BOT_TOKEN=$token|" .env
         
-        # Chat ID
-        echo -n "2. Telegram Chat ID: "
+        # Chat ID (REQUIRED)
+        echo -n "2. Telegram User ID (必填，从 @userinfobot 获取): "
         read -r chat_id
         [ -n "$chat_id" ] && sed -i '' "s|AUTHORIZED_USER_IDS=.*|AUTHORIZED_USER_IDS=$chat_id|" .env
         

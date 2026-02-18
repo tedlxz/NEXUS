@@ -57,6 +57,73 @@ export async function extractChanges(
   }
 }
 
+const EXTRACT_COMPANY_CHANGES_PROMPT = `You are helping a PE professional update their company database. The user wants to modify some information about a company.
+
+Given:
+1. The company's current profile (YAML frontmatter + markdown)
+2. The user's modification request (natural language, may be Chinese or English)
+
+Extract the specific changes the user wants to make. Only include fields that the user explicitly wants to change. Do NOT include unchanged fields.
+
+Understand Chinese equivalents:
+- 上市公司 = listed: true, 非上市公司 = listed: false
+- 美股 = market: "us", A股 = market: "cn", 港股 = market: "hk", 日股 = market: "jp", 韩股 = market: "kr"
+- 上市地点/上市市场 = market field
+- 股票代码/代码 = ticker field
+- 行业 = industry field
+- 标签/tag = tags field
+- 网站 = website field
+- 简介/描述/介绍 = description field
+- 特别关注/star = starred field
+
+Return ONLY valid JSON:
+{
+  "changes": {
+    "listed": true/false or omit,
+    "market": "us"/"cn"/"hk"/"jp"/"kr" or omit,
+    "ticker": "string" or omit,
+    "industry": "string" or omit,
+    "tags": ["new list"] or omit,
+    "website": "string" or omit,
+    "description": "string" or omit,
+    "starred": true/false or omit
+  },
+  "description": "One-line summary of what is being changed (in the user's language)"
+}
+
+Only include keys in "changes" that are actually being modified. Omit fields that are not mentioned.`;
+
+export interface CompanyChanges {
+  changes: Record<string, unknown>;
+  description: string;
+}
+
+export async function extractCompanyChanges(
+  currentProfile: string,
+  modificationRequest: string
+): Promise<CompanyChanges> {
+  try {
+    const resp = await ai.chat.completions.create({
+      model: MODEL,
+      messages: [
+        { role: 'system', content: EXTRACT_COMPANY_CHANGES_PROMPT },
+        {
+          role: 'user',
+          content: `Current profile:\n${currentProfile}\n\nModification request:\n${modificationRequest}`,
+        },
+      ],
+      temperature: 0.1,
+    });
+
+    const raw = resp.choices[0]?.message?.content || '{}';
+    console.log('[AI Extract Company Changes]', raw.slice(0, 300));
+    return JSON.parse(extractJson(raw));
+  } catch (err) {
+    console.error('Extract company changes error:', err);
+    return { changes: {}, description: 'Failed to extract company changes.' };
+  }
+}
+
 const PARSE_REFILE_PROMPT = `You are helping a PE professional reorganize their conversation records.
 
 The user wants to reassign a conversation record to a different contact, or correct which contact a conversation belongs to.

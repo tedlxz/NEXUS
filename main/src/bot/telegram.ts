@@ -361,7 +361,7 @@ export function createBot(): Telegraf {
     try {
       // Check if user has a pending Y/N confirmation
       const pending = getPendingAction(userId);
-      if (pending && (pending.type === 'new_contact' || pending.type === 'log_conversation' || pending.type === 'transcript')) {
+      if (pending && (pending.type === 'new_contact' || pending.type === 'log_conversation' || pending.type === 'transcript' || pending.type === 'update_entity')) {
         const lower = text.trim().toLowerCase();
         if (lower === 'y' || lower === 'yes' || lower === '是' || lower === '确认') {
           await ctx.sendChatAction('typing');
@@ -504,7 +504,7 @@ async function sendReply(ctx: Context, text: string, withButtons: boolean = fals
 
   // Strip the text-based confirmation prompt since we use buttons
   const cleanText = withButtons
-    ? stripped.replace(/\n*Reply \*\*Y\*\*.*confirm.*cancel\./i, '').replace(/\n*回复.*确认.*取消.*/i, '').trimEnd()
+    ? stripped.replace(/\n*Reply \*\*Y\*\*.*confirm.*cancel\./i, '').replace(/\n*回复.*确认.*取消.*/i, '').replace(/\n*确认修改？$/i, '').trimEnd()
     : stripped;
 
   if (cleanText.length > 4000) {

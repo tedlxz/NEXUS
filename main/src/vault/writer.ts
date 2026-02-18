@@ -219,6 +219,57 @@ export class VaultWriter {
     return filePath;
   }
 
+  /** Update specific fields of an existing company file */
+  async updateCompany(companyName: string, changes: Record<string, unknown>): Promise<void> {
+    const safeName = companyName.replace(/[<>:"/\\|?*]/g, ' ');
+    const filePath = path.join(vaultPaths.companies, `${safeName}.md`);
+    const exists = await fileExists(filePath);
+    if (!exists) {
+      console.error(`[UpdateCompany] File not found: ${filePath}`);
+      return;
+    }
+
+    const matter = await import('gray-matter');
+    const raw = await fs.readFile(filePath, 'utf-8');
+    const parsed = matter.default(raw);
+
+    // Merge only provided fields into frontmatter
+    if (changes.listed !== undefined) parsed.data.listed = changes.listed;
+    if (changes.market !== undefined) parsed.data.market = changes.market;
+    if (changes.ticker !== undefined) parsed.data.ticker = changes.ticker;
+    if (changes.industry !== undefined) parsed.data.industry = changes.industry;
+    if (changes.starred !== undefined) parsed.data.starred = changes.starred;
+    if (changes.tags !== undefined) parsed.data.tags = changes.tags;
+    if (changes.website !== undefined) parsed.data.website = changes.website;
+    if (changes.description !== undefined) parsed.data.description = changes.description;
+    parsed.data.updated = new Date().toISOString().slice(0, 10);
+
+    // Rebuild Basic Info block in markdown body
+    const marketNames: Record<string, string> = {
+      us: '美股', cn: 'A股', hk: '港股', jp: '日股', kr: '韩股',
+    };
+    const listedVal = parsed.data.listed;
+    const marketVal = parsed.data.market;
+    const tickerVal = parsed.data.ticker;
+    const marketDisplay = marketVal ? (marketNames[marketVal] || marketVal) : '—';
+
+    const basicInfoContent =
+      `> **上市状态：** ${listedVal ? '上市公司' : '非上市公司'}\n` +
+      `> **上市地点：** ${marketDisplay}\n` +
+      `> **股票代码：** ${tickerVal || '—'}`;
+
+    let body = parsed.content;
+    body = replaceSection(body, 'Basic Info', basicInfoContent);
+
+    // Update Notes section if description changed
+    if (changes.description !== undefined) {
+      body = replaceSection(body, 'Notes', changes.description as string);
+    }
+
+    const newContent = matter.default.stringify(body, parsed.data);
+    await atomicWrite(filePath, newContent);
+  }
+
   /** Add conversation link to a company */
   async addConversationToCompany(
     companyName: string,

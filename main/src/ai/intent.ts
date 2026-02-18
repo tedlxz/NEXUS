@@ -39,7 +39,17 @@ Important rules:
 - If information is insufficient, include "clarification_needed" with a question
 - If the user says "特别关注"/"star"/"重点关注" about a contact or company, that is "update_contact" with starred: true. For companies, also include is_company: true in extracted_data.
 - If the user says "取消特别关注"/"unstar"/"取消重点关注" about a contact or company, that is "update_contact" with starred: false. For companies, also include is_company: true in extracted_data.
-- Examples: "把Insta360设为特别关注" → update_contact with name: "Insta360", starred: true, is_company: true
+- If the user corrects or updates info about a company (listing status, industry, description, ticker, market, tags, website, etc.), that is "update_contact" with is_company: true in extracted_data.
+- If the user corrects or updates info about a person (role, organization, profile, notes, etc.), that is "update_contact".
+- Examples:
+  - "把Insta360设为特别关注" → update_contact with name: "Insta360", starred: true, is_company: true
+  - "Insta360 是上市公司" → update_contact with name: "Insta360", is_company: true
+  - "Insta360 不是非上市公司，它是上市公司" → update_contact with name: "Insta360", is_company: true
+  - "给 Insta360 加个标签：消费电子" → update_contact with name: "Insta360", is_company: true
+  - "Insta360 的行业改成智能硬件" → update_contact with name: "Insta360", is_company: true
+  - "把张三的职位改成 VP" → update_contact with name: "张三"
+  - "张三现在去了阿里巴巴" → update_contact with name: "张三"
+  - "Kevin 的背景补充一下，他之前在 Intel 工作过" → update_contact with name: "Kevin"
 - For "new_contact", extract: name, current_role, current_org, industries, how_we_met, tags
 - For "log_conversation", extract: contact (name), source (communication channel)
 - For "query", extract: contact_ref (how user referred to the person, may be vague/partial), topic (what they want to know about), query_type ("conversation_history" if asking about past conversations, "contact_info" if asking about a person's info, "search" if general search)

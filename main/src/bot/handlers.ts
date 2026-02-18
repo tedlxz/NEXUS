@@ -3,6 +3,7 @@ import { indexManager } from '../vault/index-manager';
 import { actionItemsManager } from '../vault/action-items';
 import { classifyIntent, IntentResult } from '../ai/intent';
 import { parseProfile } from '../ai/profile';
+import { extractChanges, extractCompanyChanges } from '../ai/modify';
 import { summarizeConversation } from '../ai/conversation';
 import { brainstorm } from '../ai/brainstorm';
 import { resolveContactFuzzy, summarizeConversationHistory } from '../ai/query';
@@ -32,8 +33,8 @@ function refreshStarredList(): void {
 
 // Pending confirmations per user
 interface PendingAction {
-  type: 'new_contact' | 'log_conversation' | 'transcript' | 'transcript_contact_pending' | 'transcript_confirm_pending' | 'transcript_new_contact_confirm';
-  data: PersonData | ConversationData | { content: string; fileName: string; caption: string; extractedDate?: string } | { matches: Array<{name: string; info: string}>; originalName: string; transcriptData: { content: string; fileName: string; caption: string; extractedDate?: string } } | { confirmedNames: string[]; transcriptData: { content: string; fileName: string; caption: string; extractedDate?: string } } | { personData: PersonData; conversationData: ConversationData };
+  type: 'new_contact' | 'log_conversation' | 'transcript' | 'transcript_contact_pending' | 'transcript_confirm_pending' | 'transcript_new_contact_confirm' | 'update_entity';
+  data: PersonData | ConversationData | { content: string; fileName: string; caption: string; extractedDate?: string } | { matches: Array<{name: string; info: string}>; originalName: string; transcriptData: { content: string; fileName: string; caption: string; extractedDate?: string } } | { confirmedNames: string[]; transcriptData: { content: string; fileName: string; caption: string; extractedDate?: string } } | { personData: PersonData; conversationData: ConversationData } | { name: string; isCompany: boolean; changes: Record<string, unknown>; description: string };
   originalText: string;
   previewText: string;
 }
@@ -86,6 +87,8 @@ export async function confirmPendingAction(userId: number): Promise<string> {
   } else if (pending.type === 'transcript_contact_pending') {
     // This shouldn't happen - user should respond with contact name directly
     return '请告诉我联系人姓名。';
+  } else if (pending.type === 'update_entity') {
+    return executeUpdateEntity(pending.data as { name: string; isCompany: boolean; changes: Record<string, unknown>; description: string });
   }
 
   return 'Unknown action type.';
@@ -868,71 +871,149 @@ async function handleUpdateContact(text: string, intent: IntentResult, userId: n
 
   const isCompany = intent.extracted_data.is_company === true;
 
-  // Handle company updates (e.g. starring a company)
+  // Company path
   if (isCompany) {
     const { CompaniesRepo } = await import('../db/companies-repo');
     const companiesRepo = new CompaniesRepo(getDb());
     const existingCompany = companiesRepo.findByName(name);
     if (!existingCompany) {
-      return `I don't have a company named "${name}".`;
+      return `找不到名为 "${name}" 的公司。`;
     }
 
-    const starred = intent.extracted_data.starred as boolean | undefined;
-    if (starred !== undefined) {
-      companiesRepo.upsertCompany({ ...existingCompany, starred }, existingCompany.tags);
+    // Read the current company vault file for AI context
+    const safeName = name.replace(/[<>:"/\\|?*]/g, ' ');
+    const filePath = path.join(vaultPaths.companies, `${safeName}.md`);
+    const currentFileContent = await vaultWriter.readFile(filePath) || '';
 
-      // Update Obsidian file frontmatter
-      const safeName = name.replace(/[<>:"/\\|?*]/g, ' ');
-      const filePath = path.join(vaultPaths.companies, `${safeName}.md`);
-      try {
-        const matter = await import('gray-matter');
-        const raw = await fs.readFile(filePath, 'utf-8');
-        const parsed = matter.default(raw);
-        parsed.data.starred = starred;
-        parsed.data.updated = new Date().toISOString().slice(0, 10);
-        const newContent = matter.default.stringify(parsed.content, parsed.data);
-        await fs.writeFile(filePath, newContent, 'utf-8');
-      } catch (err) {
-        console.error(`[Update Company] Error updating file:`, err);
-      }
+    const result = await extractCompanyChanges(currentFileContent, text);
+
+    if (!result.changes || Object.keys(result.changes).length === 0) {
+      return `无法从消息中提取对 **${name}** 的修改内容。请更明确地描述要修改什么。`;
     }
 
-    let response = starred
-      ? `✅ **${name}** 已设为特别关注。`
-      : `✅ **${name}** 已取消特别关注。`;
+    // Build confirmation preview
+    const changedFields = Object.keys(result.changes);
+    const fieldLabels: Record<string, string> = {
+      listed: '上市状态', market: '上市地点', ticker: '股票代码',
+      industry: '行业', tags: '标签', website: '网站',
+      description: '描述', starred: '特别关注',
+    };
+    const fieldList = changedFields.map(f => fieldLabels[f] || f).join('、');
+    let preview = `将修改 **${name}** 的信息：\n${result.description}\n\n变更字段：${fieldList}`;
+
+    pendingActions.set(userId, {
+      type: 'update_entity',
+      data: { name, isCompany: true, changes: result.changes, description: result.description },
+      originalText: text,
+      previewText: preview,
+    });
+
+    return preview + '\n\n确认修改？';
+  }
+
+  // Contact path
+  const existing = await indexManager.findByName(name);
+  if (!existing) {
+    return `找不到名为 "${name}" 的联系人。要新建联系人吗？`;
+  }
+
+  // Read the current vault file for AI context
+  const currentFileContent = await vaultWriter.readFile(
+    path.join(config.vault.path, existing.file)
+  ) || '';
+
+  const result = await extractChanges(currentFileContent, text);
+
+  if (!result.changes || Object.keys(result.changes).length === 0) {
+    return `无法从消息中提取对 **${name}** 的修改内容。请更明确地描述要修改什么。`;
+  }
+
+  // Build confirmation preview
+  const changedFields = Object.keys(result.changes);
+  const fieldLabels: Record<string, string> = {
+    current_role: '职位', current_org: '公司', industries: '行业',
+    closeness: '亲密度', starred: '特别关注', tags: '标签',
+    profile: '简介', notes: '备注',
+  };
+  const fieldList = changedFields.map(f => fieldLabels[f] || f).join('、');
+  let preview = `将修改 **${name}** 的信息：\n${result.description}\n\n变更字段：${fieldList}`;
+
+  pendingActions.set(userId, {
+    type: 'update_entity',
+    data: { name, isCompany: false, changes: result.changes, description: result.description },
+    originalText: text,
+    previewText: preview,
+  });
+
+  return preview + '\n\n确认修改？';
+}
+
+async function executeUpdateEntity(data: { name: string; isCompany: boolean; changes: Record<string, unknown>; description: string }): Promise<string> {
+  const { name, isCompany, changes } = data;
+
+  if (isCompany) {
+    // Update Obsidian company file
+    await vaultWriter.updateCompany(name, changes);
+
+    // Update SQL database
+    const { CompaniesRepo } = await import('../db/companies-repo');
+    const companiesRepo = new CompaniesRepo(getDb());
+    const existingCompany = companiesRepo.findByName(name);
+    if (existingCompany) {
+      const updatedData = { ...existingCompany };
+      if (changes.industry !== undefined) updatedData.industry = changes.industry as string;
+      if (changes.website !== undefined) updatedData.website = changes.website as string;
+      if (changes.description !== undefined) updatedData.description = changes.description as string;
+      if (changes.starred !== undefined) updatedData.starred = changes.starred as boolean;
+      const newTags = changes.tags !== undefined ? changes.tags as string[] : existingCompany.tags;
+      companiesRepo.upsertCompany(updatedData, newTags);
+    }
+
+    let response = `✅ 已更新 **${name}** 的公司信息。`;
 
     refreshDashboard();
     refreshStarredList();
     return response;
   }
 
+  // Contact path
   const existing = await indexManager.findByName(name);
   if (!existing) {
-    return `I don't have a contact named "${name}". Would you like to create a new contact instead?`;
+    return `找不到名为 "${name}" 的联系人。`;
   }
 
-  const profileData = await parseProfile(name, text);
-  await vaultWriter.updatePerson(name, profileData);
+  // Build partial PersonData from changes for updatePerson
+  const personUpdates: Partial<PersonData> = {};
+  if (changes.current_role !== undefined) personUpdates.current_role = changes.current_role as string;
+  if (changes.current_org !== undefined) personUpdates.current_org = changes.current_org as string;
+  if (changes.industries !== undefined) personUpdates.industries = changes.industries as string[];
+  if (changes.closeness !== undefined) personUpdates.closeness = changes.closeness as PersonData['closeness'];
+  if (changes.starred !== undefined) personUpdates.starred = changes.starred as boolean;
+  if (changes.tags !== undefined) personUpdates.tags = changes.tags as string[];
+  if (changes.profile !== undefined) personUpdates.profile = changes.profile as string;
+  if (changes.notes !== undefined) personUpdates.notes = changes.notes as string;
+
+  await vaultWriter.updatePerson(name, personUpdates);
 
   await indexManager.addOrUpdate({
-    name: profileData.name || name,
+    name,
     file: existing.file,
-    current_role: profileData.current_role || existing.current_role,
-    current_org: profileData.current_org || existing.current_org,
-    industries: profileData.industries || existing.industries,
-    closeness: profileData.closeness || existing.closeness,
-    starred: profileData.starred !== undefined ? profileData.starred : existing.starred,
-    tags: profileData.tags || existing.tags,
+    current_role: personUpdates.current_role ?? existing.current_role,
+    current_org: personUpdates.current_org ?? existing.current_org,
+    industries: personUpdates.industries ?? existing.industries,
+    closeness: personUpdates.closeness ?? existing.closeness,
+    starred: personUpdates.starred ?? existing.starred,
+    tags: personUpdates.tags ?? existing.tags,
   });
 
-  let response = `✅ Updated **${name}**'s profile.`;
+  let response = `✅ 已更新 **${name}** 的联系人信息。`;
 
   // Restart bot to sync database
   try {
     await restartBot();
-    response += ` Bot restarted and synced.`;
+    response += ` 已同步。`;
   } catch (err) {
-    response += ` ⚠️ Update saved but bot restart failed.`;
+    response += ` ⚠️ 信息已保存但同步失败。`;
   }
 
   refreshDashboard();
