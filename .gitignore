@@ -2,6 +2,7 @@
 /*
 !/main
 !/README.md
+!/install_launcher.sh
 
 # Dependencies (inside main)
 main/node_modules/
