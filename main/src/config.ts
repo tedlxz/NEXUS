@@ -24,11 +24,18 @@ export const config = {
     model: 'MiniMax-M2.5',
   },
   vault: {
-    path: process.env.VAULT_PATH ||
+    // Default vault path
+    path: process.env.VAULT_PATH_DEFAULT ||
+      process.env.VAULT_PATH ||
       path.join(
         process.env.HOME || '',
         'Library/Mobile Documents/iCloud~md~obsidian/Documents/Nexus-Vault'
       ),
+    // Get vault path for a specific user ID
+    getVaultPath: function(userId: string): string {
+      const userVaultKey = `VAULT_PATH_${userId}`;
+      return process.env[userVaultKey] || this.path;
+    },
   },
   brave: {
     apiKey: process.env.BRAVE_SEARCH_API_KEY || '',
