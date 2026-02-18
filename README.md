@@ -160,12 +160,25 @@ NEXUS uses a file watcher to keep Obsidian and SQLite in sync:
 
 ### Option 1: NEXUS Launcher (Recommended for macOS)
 
-1. Download `NEXUS Launcher.app` from the `main/launcher/` folder
-2. Run the app
-3. Enter your **User ID** (get from @userinfobot)
-4. Enter your **MiniMax API Key**
-5. Confirm or customize your Obsidian Vault path
-6. Click Start
+**Run the installer:**
+
+```bash
+# Clone the repository
+git clone https://github.com/tedlxz/NEXUS.git
+cd NEXUS
+
+# Run the installer
+chmod +x install_launcher.sh
+./install_launcher.sh
+```
+
+The installer will guide you through:
+1. Check and install required dependencies (Node.js, PM2)
+2. Configure your settings (User ID, API keys, Vault path)
+3. Build the project
+4. Start NEXUS service
+
+After installation, you can also run the macOS app from `main/launcher/NEXUS Launcher.app`.
 
 ### Option 2: Command Line
 

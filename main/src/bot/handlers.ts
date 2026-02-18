@@ -66,6 +66,18 @@ const pendingActions = new Map<number, PendingAction>();
 
 export { pendingActions };
 
+// Per-user chat history for multi-turn conversation context
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+const MAX_HISTORY = 20; // 10 user+assistant turn pairs
+const chatHistory = new Map<number, ChatMessage[]>();
+
+export function clearChatHistory(userId: number): void {
+  chatHistory.delete(userId);
+}
+
 export function getPendingAction(userId: number): PendingAction | undefined {
   return pendingActions.get(userId);
 }
@@ -257,7 +269,7 @@ export async function handleMessage(text: string, userId: number): Promise<strin
       return handleActionItem(text, intent);
     case 'daily_note':
     default:
-      return handleChat(text);
+      return handleChat(text, userId);
   }
 }
 
@@ -1261,7 +1273,7 @@ async function handleActionItem(text: string, intent: IntentResult): Promise<str
   return response;
 }
 
-async function handleChat(text: string): Promise<string> {
+async function detectSearchNeed(text: string): Promise<{ needs_search: boolean; search_query: string }> {
   try {
     const { ai, MODEL } = await import('../ai/client');
     const resp = await ai.chat.completions.create({
@@ -1269,18 +1281,111 @@ async function handleChat(text: string): Promise<string> {
       messages: [
         {
           role: 'system',
-          content: `你是 NEXUS，一个帮助 PE 投资专业人士管理人脉和对话的 AI 助手。你可以自然地和用户对话，回答问题，提供建议。
+          content: `判断用户消息是否需要搜索互联网才能回答。输出 JSON：{"needs_search": true/false, "search_query": "优化后的搜索词"}
 
-用户可能会用中文或英文跟你聊天。请用和用户相同的语言回复。
+需要搜索：新闻、时事、市场数据、公司近况、行业趋势、最新政策、任何需要实时信息的问题。
+不需要搜索：闲聊、问候、通用知识问答、个人偏好问题、系统操作指令。
 
-回答要简洁实用，不要过于冗长。直接输出答案，不要输出思考过程、推理步骤或分析过程。`,
+search_query 应该是优化后的英文或中文搜索关键词，适合搜索引擎使用。
+
+只输出 JSON，不要其他内容。`,
         },
         { role: 'user', content: text },
       ],
+      temperature: 0,
+      max_tokens: 150,
+    });
+
+    const raw = resp.choices[0]?.message?.content || '';
+    const { extractJson } = await import('../ai/utils');
+    const parsed = JSON.parse(extractJson(raw));
+    return {
+      needs_search: !!parsed.needs_search,
+      search_query: parsed.search_query || text,
+    };
+  } catch (err) {
+    console.error('[SearchDetect Error]', err);
+    return { needs_search: false, search_query: text };
+  }
+}
+
+async function handleChat(text: string, userId: number): Promise<string> {
+  try {
+    const { ai, MODEL } = await import('../ai/client');
+
+    // Step 1: Determine if search is needed
+    const { needs_search, search_query } = await detectSearchNeed(text);
+    console.log(`[Chat] needs_search=${needs_search}, query="${search_query}"`);
+
+    let systemPrompt: string;
+
+    if (needs_search) {
+      // Step 2: Fetch search results
+      const { braveSearch } = await import('../search/brave');
+      const results = await braveSearch(search_query, 5);
+
+      if (results.length > 0) {
+        const searchContext = results
+          .map((r, i) => `[${i + 1}] ${r.title}\n${r.description}${r.age ? ` (${r.age})` : ''}\nURL: ${r.url}`)
+          .join('\n\n');
+
+        systemPrompt = `你是 NEXUS，一个帮助 PE 投资专业人士管理人脉和对话的 AI 助手。
+
+以下是从互联网搜索到的参考资料：
+---
+${searchContext}
+---
+
+请基于以上搜索结果回答用户的问题。要求：
+1. 综合多个来源的信息给出全面的回答
+2. 在回答中标注信息来源（用 [1] [2] 等编号引用）
+3. 在回答末尾列出参考链接
+4. 用和用户相同的语言回复
+5. 回答要简洁实用，直接输出答案`;
+      } else {
+        // Search returned no results, fall back to pure chat
+        systemPrompt = `你是 NEXUS，一个帮助 PE 投资专业人士管理人脉和对话的 AI 助手。你可以自然地和用户对话，回答问题，提供建议。
+
+用户可能会用中文或英文跟你聊天。请用和用户相同的语言回复。
+
+回答要简洁实用，不要过于冗长。直接输出答案，不要输出思考过程、推理步骤或分析过程。
+
+注意：我尝试搜索了相关信息但没有找到结果，请根据你已有的知识尽量回答。`;
+      }
+    } else {
+      // No search needed — pure chat
+      systemPrompt = `你是 NEXUS，一个帮助 PE 投资专业人士管理人脉和对话的 AI 助手。你可以自然地和用户对话，回答问题，提供建议。
+
+用户可能会用中文或英文跟你聊天。请用和用户相同的语言回复。
+
+回答要简洁实用，不要过于冗长。直接输出答案，不要输出思考过程、推理步骤或分析过程。`;
+    }
+
+    // Step 3: Build messages with conversation history
+    const history = chatHistory.get(userId) || [];
+    history.push({ role: 'user', content: text });
+
+    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+      { role: 'system', content: systemPrompt },
+      ...history,
+    ];
+
+    const resp = await ai.chat.completions.create({
+      model: MODEL,
+      messages,
       temperature: 0.7,
     });
 
-    return resp.choices[0]?.message?.content || '抱歉，我没有生成回复。';
+    const reply = resp.choices[0]?.message?.content || '抱歉，我没有生成回复。';
+
+    // Save assistant reply to history and trim if needed
+    history.push({ role: 'assistant', content: reply });
+    if (history.length > MAX_HISTORY) {
+      history.splice(0, history.length - MAX_HISTORY);
+    }
+    chatHistory.set(userId, history);
+
+    return reply;
   } catch (err) {
     console.error('[Chat Error]', err);
     return '抱歉，对话服务暂时不可用。';

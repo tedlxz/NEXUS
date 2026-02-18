@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ========================================
-# NEXUS Launcher - 快速安装脚本
+# NEXUS Launcher - Quick Install Script
 # ========================================
 
 RED='\033[0;31m'

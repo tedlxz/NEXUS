@@ -37,6 +37,7 @@ import {
   getPendingAction,
   confirmPendingAction,
   clearPendingAction,
+  clearChatHistory,
   pendingActions,
 } from './handlers';
 import { runNewsflow } from '../newsflow';
@@ -91,9 +92,15 @@ export function createBot(): Telegraf {
       '/migrate — Migrate company data\n' +
       '/sync — Sync Obsidian changes to SQL\n' +
       '/enrich — Enrich contact profiles with AI\n' +
+      '/clear — 清空对话上下文\n' +
       '/export — Export contact index',
       { parse_mode: 'MarkdownV2' }
     );
+  });
+
+  bot.command('clear', async (ctx) => {
+    clearChatHistory(ctx.from.id);
+    await ctx.reply('🗑 对话上下文已清空。');
   });
 
   bot.command('status', async (ctx) => {
@@ -494,6 +501,23 @@ export function createBot(): Telegraf {
   bot.catch((err: unknown, ctx: Context) => {
     console.error('[Bot Error]', err);
   });
+
+  // Register command menu for Telegram input field
+  bot.telegram.setMyCommands([
+    { command: 'start', description: '显示帮助信息' },
+    { command: 'brainstorm', description: '查找相关人脉' },
+    { command: 'delete', description: '删除联系人' },
+    { command: 'status', description: '系统概览' },
+    { command: 'pending', description: '待办事项' },
+    { command: 'followup', description: '到期跟进' },
+    { command: 'dashboard', description: '生成数据看板' },
+    { command: 'migrate', description: '迁移公司数据' },
+    { command: 'sync', description: '同步 Obsidian 到 SQL' },
+    { command: 'enrich', description: 'AI 丰富联系人资料' },
+    { command: 'newsflow', description: '生成新闻推送' },
+    { command: 'clear', description: '清空对话上下文' },
+    { command: 'export', description: '导出联系人索引' },
+  ]).catch(err => console.error('[Bot] Failed to set command menu:', err));
 
   return bot;
 }

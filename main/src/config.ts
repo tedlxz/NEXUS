@@ -30,6 +30,10 @@ export const config = {
         'Library/Mobile Documents/iCloud~md~obsidian/Documents/Nexus-Vault'
       ),
   },
+  brave: {
+    apiKey: process.env.BRAVE_SEARCH_API_KEY || '',
+    baseUrl: 'https://api.search.brave.com/res/v1',
+  },
   web: {
     port: parseInt(process.env.PORT || '3000', 10),
     password: process.env.WEB_PASSWORD || '',
