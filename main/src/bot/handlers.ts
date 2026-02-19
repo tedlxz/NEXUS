@@ -473,13 +473,8 @@ async function executeNewContact(profileData: PersonData, userId?: string): Prom
   if (profileData.tags?.length) response += `\n🏷 ${profileData.tags.join(', ')}`;
   response += `\n📁 ${fileName}`;
 
-  // Restart bot to sync database
-  try {
-    await restartBot();
-    response += `\n🔄 Bot restarted and synced.`;
-  } catch (err) {
-    response += `\n⚠️ Contact saved but bot restart failed.`;
-  }
+  // Note: No bot restart needed - database syncs automatically via watcher
+  // Company linking is done above in this function
 
   refreshDashboard(userId);
   refreshStarredList(userId);
@@ -847,12 +842,7 @@ async function createContactAndSaveTranscript(
     // Save the conversation
     await executeLogConversation(convData, transcriptData.content);
     
-    // Step 5: Restart bot to sync
-    try {
-      await restartBot();
-    } catch (err) {
-      console.error('[Create Contact] Bot restart failed:', err);
-    }
+    // Note: No bot restart needed - database syncs automatically
     
     let response = `✅ 新联系人 **${contactName}** 已创建并保存对话！\n\n`;
     if (profileData.current_role) response += `📋 ${profileData.current_role}`;
@@ -901,12 +891,7 @@ export async function executeNewContactWithTranscript(
     // Step 3: Save conversation/transcript
     await executeLogConversation(conversationData, conversationData.raw_transcript || '', userId);
     
-    // Step 4: Restart bot to sync
-    try {
-      await restartBot();
-    } catch (err) {
-      console.error('[Create Contact] Bot restart failed:', err);
-    }
+    // Note: No bot restart needed - database syncs automatically
     
     let response = `✅ 新联系人 **${personData.name}** 已创建并归档对话！\n\n`;
     if (personData.current_role) response += `📋 ${personData.current_role}`;
@@ -1097,13 +1082,8 @@ async function executeUpdateEntity(data: { name: string; isCompany: boolean; cha
 
   let response = `✅ 已更新 **${name}** 的联系人信息。`;
 
-  // Restart bot to sync database
-  try {
-    await restartBot();
-    response += ` 已同步。`;
-  } catch (err) {
-    response += ` ⚠️ 信息已保存但同步失败。`;
-  }
+  // Note: No bot restart needed - database syncs automatically
+  // Company linking is done above
 
   refreshDashboard(userId);
   refreshStarredList(userId);
@@ -1899,13 +1879,8 @@ export async function handleDeleteContact(name: string, userId?: string): Promis
 
   let response = `✅ Deleted contact: **${name}**`;
 
-  // Restart bot to sync database
-  try {
-    await restartBot();
-    response += `. Bot restarted and synced.`;
-  } catch (err) {
-    response += `. ⚠️ Contact deleted but bot restart failed.`;
-  }
+  // Note: No bot restart needed - database will sync automatically
+  // Company links will be cleaned up on next sync
 
   refreshDashboard(userId);
   refreshStarredList(userId);
