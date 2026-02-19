@@ -1512,6 +1512,29 @@ async function handleConversationQuery(
 /**
  * Handle news search request - search for company/person news on demand
  */
+/**
+ * Escape Telegram Markdown special characters to prevent parsing errors
+ */
+function escapeMarkdown(text: string): string {
+  // Escape special characters that Telegram Markdown interprets
+  return text
+    .replace(/\_/g, '\\_')
+    .replace(/\*/g, '\\*')
+    .replace(/\[/g, '\\[')
+    .replace(/\]/g, '\\]')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)')
+    .replace(/~/g, '\\~')
+    .replace(/`/g, '\\`')
+    .replace(/>/g, '\\>')
+    .replace(/#/g, '\\#')
+    .replace(/\+/g, '\\+')
+    .replace(/=/g, '\\=')
+    .replace(/\|/g, '\\|')
+    .replace(/{/g, '\\{')
+    .replace(/}/g, '\\}');
+}
+
 async function handleNewsSearch(text: string, intent: IntentResult, userId: number): Promise<string> {
   const company = (intent.extracted_data.company as string) || text;
   const topic = (intent.extracted_data.topic as string) || '';
@@ -1533,11 +1556,11 @@ async function handleNewsSearch(text: string, intent: IntentResult, userId: numb
     const results = await braveSearch(searchQuery, 10);
 
     if (results.length === 0) {
-      return `没有找到关于 **${company}** 的新闻结果。`;
+      return `没有找到关于 ${company} 的新闻结果。`;
     }
 
-    // Format results
-    let response = `📰 关于 **${company}** 的新闻：\n\n`;
+    // Format results - use plain text to avoid Markdown parsing issues
+    let response = `📰 关于 ${company} 的新闻：\n\n`;
     
     // Add date filter hint if this is a follow-up asking for recent news
     if (text.includes('近') || text.includes('最近') || text.includes('最新')) {
@@ -1545,9 +1568,13 @@ async function handleNewsSearch(text: string, intent: IntentResult, userId: numb
     }
 
     for (const r of results.slice(0, 8)) {
-      response += `• **${r.title}**\n`;
-      if (r.description) {
-        response += `  ${r.description.slice(100)}...\n`;
+      // Escape Markdown in title and description
+      const title = escapeMarkdown(r.title || '无标题');
+      const desc = r.description ? escapeMarkdown(r.description.slice(0, 100)) : '';
+      
+      response += `• ${title}\n`;
+      if (desc) {
+        response += `  ${desc}...\n`;
       }
       if (r.age) {
         response += `  🕐 ${r.age}\n`;
@@ -1566,7 +1593,7 @@ async function handleNewsSearch(text: string, intent: IntentResult, userId: numb
     return response;
   } catch (err) {
     console.error('[NewsSearch Error]', err);
-    return `搜索 **${company}** 新闻失败：${err}`;
+    return `搜索 ${company} 新闻失败：${err}`;
   }
 }
 
