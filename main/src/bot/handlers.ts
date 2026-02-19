@@ -2,11 +2,11 @@ import { vaultWriter, getUserVaultPaths } from '../vault/writer';
 import { indexManager, getIndexManager } from '../vault/index-manager';
 import { actionItemsManager } from '../vault/action-items';
 import { classifyIntent, IntentResult } from '../ai/intent';
-import { parseProfile } from '../ai/profile';
+import { parseProfile, reEnrichProfile } from '../ai/profile';
 import { extractChanges, extractCompanyChanges } from '../ai/modify';
 import { summarizeConversation } from '../ai/conversation';
 import { brainstorm } from '../ai/brainstorm';
-import { resolveContactFuzzy, summarizeConversationHistory } from '../ai/query';
+import { resolveContactFuzzy, summarizeConversationHistory, generateProfileSummary } from '../ai/query';
 import { config, vaultPaths, ConversationData, PersonData } from '../config';
 import { getDb } from '../db/database';
 import { runMigrationIfNeeded } from '../db/migrate';
@@ -261,6 +261,8 @@ export async function handleMessage(text: string, userId: number): Promise<strin
       return handleLogConversation(text, intent, userId);
     case 'update_contact':
       return handleUpdateContact(text, intent, userId);
+    case 'enrich_contact':
+      return handleEnrichContact(text, intent, userId);
     case 'brainstorm':
       return handleBrainstorm(text, intent);
     case 'query':
@@ -438,6 +440,21 @@ async function executeNewContact(profileData: PersonData, userId?: string): Prom
     starred: profileData.starred,
     tags: profileData.tags,
   });
+
+  // Auto-create and link company record if current_org is set
+  if (profileData.current_org) {
+    try {
+      const contactId = await indexManager.getContactId(profileData.name);
+      if (contactId) {
+        const { CompaniesRepo } = await import('../db/companies-repo');
+        const companiesRepo = new CompaniesRepo(db);
+        const companyId = companiesRepo.findOrCreateCompany(profileData.current_org);
+        companiesRepo.setContactCompany(contactId, companyId, 'current');
+      }
+    } catch (err) {
+      console.error('[New Contact] Company link error:', err);
+    }
+  }
 
   const fileName = path.basename(filePath);
   let response = `✅ Created contact: **${profileData.name}**`;
@@ -1020,6 +1037,22 @@ async function executeUpdateEntity(data: { name: string; isCompany: boolean; cha
     tags: personUpdates.tags ?? existing.tags,
   });
 
+  // Auto-create and link company record if current_org was changed
+  const finalOrg = personUpdates.current_org ?? existing.current_org;
+  if (finalOrg && personUpdates.current_org !== undefined) {
+    try {
+      const contactId = await indexManager.getContactId(name);
+      if (contactId) {
+        const { CompaniesRepo } = await import('../db/companies-repo');
+        const companiesRepo = new CompaniesRepo(getDb());
+        const companyId = companiesRepo.findOrCreateCompany(finalOrg);
+        companiesRepo.setContactCompany(contactId, companyId, 'current');
+      }
+    } catch (err) {
+      console.error('[Update Contact] Company link error:', err);
+    }
+  }
+
   let response = `✅ 已更新 **${name}** 的联系人信息。`;
 
   // Restart bot to sync database
@@ -1032,6 +1065,124 @@ async function executeUpdateEntity(data: { name: string; isCompany: boolean; cha
 
   refreshDashboard(userId);
   refreshStarredList(userId);
+  return response;
+}
+
+async function handleEnrichContact(text: string, intent: IntentResult, userId: number): Promise<string> {
+  const name = (intent.extracted_data.name as string) || '';
+  const correction = (intent.extracted_data.correction as string) || text;
+
+  if (!name) {
+    return '请告诉我要重新整理哪位联系人的资料。';
+  }
+
+  const existing = await indexManager.findByName(name);
+  if (!existing) {
+    // Try fuzzy matching
+    const allContacts = await indexManager.getAll();
+    const fuzzyMatches = await resolveContactFuzzy(name, allContacts);
+    if (fuzzyMatches.length > 0 && fuzzyMatches[0].confidence >= 0.6) {
+      const matched = await indexManager.findByName(fuzzyMatches[0].name);
+      if (matched) {
+        return doEnrichContact(matched, correction, userId);
+      }
+    }
+    return `找不到名为 "${name}" 的联系人。`;
+  }
+
+  return doEnrichContact(existing, correction, userId);
+}
+
+async function doEnrichContact(
+  contact: NonNullable<Awaited<ReturnType<typeof indexManager.findByName>>>,
+  correction: string,
+  userId: number
+): Promise<string> {
+  // 1. Read current vault profile
+  let currentProfileContent = '';
+  try {
+    const fileContent = await vaultWriter.readFile(
+      path.join(config.vault.path, contact.file)
+    );
+    if (fileContent) currentProfileContent = fileContent;
+  } catch { /* file may not exist */ }
+
+  // 2. Gather conversation summaries from SQLite
+  const conversationSummaries: { date: string; summary: string }[] = [];
+  const contactId = await indexManager.getContactId(contact.name);
+  if (contactId) {
+    const convRepo = new ConversationsRepo(getDb());
+    const dbConvs = convRepo.getByContact(contactId);
+    for (const conv of dbConvs) {
+      if (conv.ai_summary) {
+        conversationSummaries.push({ date: conv.date, summary: conv.ai_summary });
+      }
+    }
+  }
+
+  // 3. Call AI to re-enrich the profile
+  const enriched = await reEnrichProfile(
+    contact.name,
+    currentProfileContent,
+    correction,
+    conversationSummaries
+  );
+
+  if (!enriched.current_role && !enriched.current_org && !enriched.profile) {
+    return `❌ 无法重新整理 **${contact.name}** 的资料，AI 未能生成有效结果。`;
+  }
+
+  // 4. Update the vault file
+  await vaultWriter.updatePerson(contact.name, enriched);
+
+  // 5. Update the index
+  await indexManager.addOrUpdate({
+    name: contact.name,
+    file: contact.file,
+    current_role: enriched.current_role ?? contact.current_role,
+    current_org: enriched.current_org ?? contact.current_org,
+    industries: enriched.industries ?? contact.industries,
+    closeness: enriched.closeness ?? contact.closeness,
+    starred: enriched.starred ?? contact.starred,
+    tags: enriched.tags ?? contact.tags,
+  });
+
+  // 6. Auto-create and link company record if current_org is set
+  const finalOrg = enriched.current_org ?? contact.current_org;
+  if (finalOrg) {
+    try {
+      const cId = await indexManager.getContactId(contact.name);
+      if (cId) {
+        const db = getDb();
+        const { CompaniesRepo } = await import('../db/companies-repo');
+        const companiesRepo = new CompaniesRepo(db);
+        const companyId = companiesRepo.findOrCreateCompany(finalOrg);
+        companiesRepo.setContactCompany(cId, companyId, 'current');
+      }
+    } catch (err) {
+      console.error('[Enrich] Company link error:', err);
+    }
+  }
+
+  // 7. Build response
+  let response = `✅ 已重新整理 **${contact.name}** 的资料。\n\n`;
+  if (enriched.current_role) response += `📋 ${enriched.current_role}`;
+  if (enriched.current_org) response += ` @ ${enriched.current_org}`;
+  if (enriched.current_role || enriched.current_org) response += '\n';
+  if (enriched.industries?.length) response += `🏭 ${enriched.industries.join(', ')}\n`;
+  if (enriched.tags?.length) response += `🏷 ${enriched.tags.join(', ')}\n`;
+  if (enriched.profile) response += `\n${enriched.profile.slice(0, 200)}...`;
+
+  // Restart bot to sync
+  try {
+    await restartBot();
+    response += `\n\n🔄 已同步。`;
+  } catch (err) {
+    response += `\n\n⚠️ 资料已保存但同步失败。`;
+  }
+
+  refreshDashboard(userId.toString());
+  refreshStarredList(userId.toString());
   return response;
 }
 
@@ -1110,22 +1261,57 @@ async function handleQuery(text: string, intent: IntentResult): Promise<string> 
     return handleConversationQuery(resolvedContact, topic || text, text);
   }
 
-  // Step 3: Simple contact info query
+  // Step 3: Contact info query — generate AI profile summary
   const contact = resolvedContact;
-  let response = `**${contact.name}**`;
-  if (contact.current_role) response += `\n📋 ${contact.current_role}`;
-  if (contact.current_org) response += ` @ ${contact.current_org}`;
-  if (contact.industries?.length) response += `\n🏭 ${contact.industries.join(', ')}`;
-  if (contact.closeness) response += `\n🤝 Closeness: ${contact.closeness}`;
-  if (contact.last_contact) response += `\n📅 Last contact: ${contact.last_contact}`;
-  if (contact.tags?.length) response += `\n🏷 ${contact.tags.join(', ')}`;
-  if (contact.recent_conversations_summary?.length) {
-    response += '\n\nRecent conversations:';
-    for (const s of contact.recent_conversations_summary.slice(0, 3)) {
-      response += `\n• ${s}`;
+
+  // Read full vault profile
+  let profileContent = '';
+  try {
+    const fileContent = await vaultWriter.readFile(
+      path.join(config.vault.path, contact.file)
+    );
+    if (fileContent) profileContent = fileContent;
+  } catch { /* file may not exist */ }
+
+  // If no vault profile, fall back to simple field dump
+  if (!profileContent) {
+    let response = `**${contact.name}**`;
+    if (contact.current_role) response += `\n📋 ${contact.current_role}`;
+    if (contact.current_org) response += ` @ ${contact.current_org}`;
+    if (contact.industries?.length) response += `\n🏭 ${contact.industries.join(', ')}`;
+    if (contact.closeness) response += `\n🤝 Closeness: ${contact.closeness}`;
+    if (contact.last_contact) response += `\n📅 Last contact: ${contact.last_contact}`;
+    if (contact.tags?.length) response += `\n🏷 ${contact.tags.join(', ')}`;
+    if (contact.recent_conversations_summary?.length) {
+      response += '\n\nRecent conversations:';
+      for (const s of contact.recent_conversations_summary.slice(0, 3)) {
+        response += `\n• ${s}`;
+      }
+    }
+    return response;
+  }
+
+  // Gather conversation summaries from SQLite
+  const conversationSummaries: { date: string; summary: string }[] = [];
+  const contactId = await indexManager.getContactId(contact.name);
+  if (contactId) {
+    const convRepo = new ConversationsRepo(getDb());
+    const dbConvs = convRepo.getByContact(contactId);
+    for (const conv of dbConvs) {
+      if (conv.ai_summary) {
+        conversationSummaries.push({ date: conv.date, summary: conv.ai_summary });
+      }
     }
   }
-  return response;
+
+  // Generate AI profile summary
+  const summary = await generateProfileSummary(
+    contact.name,
+    profileContent,
+    conversationSummaries
+  );
+
+  return summary;
 }
 
 /** Resolve a vague contact reference to an actual contact entry */

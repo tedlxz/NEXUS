@@ -5,6 +5,7 @@ export type Intent =
   | 'new_contact'
   | 'log_conversation'
   | 'update_contact'
+  | 'enrich_contact'
   | 'brainstorm'
   | 'query'
   | 'action_item'
@@ -24,11 +25,12 @@ Users will send you natural language messages via chat (may be in Chinese or Eng
 Possible intents:
 1. "new_contact" — User mentioned a newly met person or wants to record someone's info
 2. "log_conversation" — User provided a conversation transcript or wants to record a conversation that happened
-3. "update_contact" — User mentioned new info about an existing contact
-4. "brainstorm" — User wants to find relevant people from their network for a topic
-5. "query" — User is querying info about a specific contact or past conversation that is ALREADY STORED in the Nexus system (e.g. "张三是做什么的？", "我上次和庞启智聊了什么？"). This is ONLY for looking up data in the contact database, NOT for general knowledge or web searches.
-6. "action_item" — User wants to add or update a to-do item
-7. "daily_note" — This is the DEFAULT fallback. Use this for: general chat, general knowledge questions, news searches, web searches, analysis requests, opinions, advice, or ANYTHING that doesn't clearly fit the above categories. Examples: "搜索Insta360的新闻", "帮我分析一下这个市场", "今天天气怎么样", "什么是PE基金"
+3. "update_contact" — User mentioned new info about an existing contact (simple field changes like role, org, tags)
+4. "enrich_contact" — User wants to RE-PROCESS or IMPROVE an existing contact's profile. Use this when the user says things like "重新整理XX的资料", "改进XX的profile", "XX的信息不完整", "重新识别XX", "帮我补充XX的资料", or provides corrections AND asks to re-generate/improve the profile. The key difference from "update_contact": enrich_contact re-reads all data (vault file + conversations) and regenerates a comprehensive profile, while update_contact just changes specific fields.
+5. "brainstorm" — User wants to find relevant people from their network for a topic
+6. "query" — User is querying info about a specific contact or past conversation that is ALREADY STORED in the Nexus system (e.g. "张三是做什么的？", "我上次和庞启智聊了什么？"). This is ONLY for looking up data in the contact database, NOT for general knowledge or web searches.
+7. "action_item" — User wants to add or update a to-do item
+8. "daily_note" — This is the DEFAULT fallback. Use this for: general chat, general knowledge questions, news searches, web searches, analysis requests, opinions, advice, or ANYTHING that doesn't clearly fit the above categories. Examples: "搜索Insta360的新闻", "帮我分析一下这个市场", "今天天气怎么样", "什么是PE基金"
 
 Important rules:
 - Must accurately distinguish "new_contact" from "log_conversation"
@@ -50,6 +52,11 @@ Important rules:
   - "把张三的职位改成 VP" → update_contact with name: "张三"
   - "张三现在去了阿里巴巴" → update_contact with name: "张三"
   - "Kevin 的背景补充一下，他之前在 Intel 工作过" → update_contact with name: "Kevin"
+  - "重新整理钱锦的资料" → enrich_contact with name: "钱锦"
+  - "钱锦的信息不完整，他是阳光电源的战略投资总监" → enrich_contact with name: "钱锦", correction: "他是阳光电源的战略投资总监"
+  - "帮我改进张三的profile，补充一下他的背景" → enrich_contact with name: "张三"
+  - "重新识别一下李四的资料，公司应该是腾讯" → enrich_contact with name: "李四", correction: "公司应该是腾讯"
+- For "enrich_contact", extract: name (contact name), correction (the user's correction text or additional info, if provided)
 - For "new_contact", extract: name, current_role, current_org, industries, how_we_met, tags
 - For "log_conversation", extract: contact (name), source (communication channel)
 - For "query", extract: contact_ref (how user referred to the person, may be vague/partial), topic (what they want to know about), query_type ("conversation_history" if asking about past conversations, "contact_info" if asking about a person's info, "search" if general search)
@@ -86,7 +93,7 @@ export async function classifyIntent(
 
     // Validate intent is one of the known types
     const validIntents: Intent[] = [
-      'new_contact', 'log_conversation', 'update_contact',
+      'new_contact', 'log_conversation', 'update_contact', 'enrich_contact',
       'brainstorm', 'query', 'action_item', 'daily_note',
     ];
     if (!validIntents.includes(parsed.intent)) {

@@ -1,6 +1,6 @@
 {
   "name": "nexus-crm",
-  "version": "0.3.0",
+  "version": "0.3.2",
   "description": "NEXUS - Personal CRM with Telegram Bot + Obsidian Vault",
   "main": "dist/index.js",
   "scripts": {

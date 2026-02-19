@@ -15,46 +15,44 @@ function toYamlList(items: string[], indent = 2): string {
 
 export function personTemplate(data: PersonData): string {
   const now = new Date().toISOString().slice(0, 10);
-  
+
   // Sanitize company name for file reference
   const safeCompanyName = data.current_org ? data.current_org.replace(/[<>:"/\\|?*]/g, ' ') : undefined;
-  
+
+  // Always include ALL frontmatter fields to match Obsidian template exactly
   const fm: string[] = [
     '---',
     'type: person',
     `name: ${toYamlValue(data.name)}`,
+    data.current_role ? `current_role: ${toYamlValue(data.current_role)}` : 'current_role:',
+    data.current_org ? `current_org: "[[${safeCompanyName}]]"` : 'current_org:',
   ];
-  if (data.current_role) fm.push(`current_role: ${toYamlValue(data.current_role)}`);
-  // Store current_org as Obsidian link to company file
-  if (data.current_org) fm.push(`current_org: "[[${safeCompanyName}]]"`);
   if (data.industries?.length) {
     fm.push('industries:');
     fm.push(toYamlList(data.industries));
+  } else {
+    fm.push('industries: []');
   }
-  if (data.closeness) fm.push(`closeness: ${data.closeness}`);
+  fm.push(`closeness: ${data.closeness || 'medium'}`);
   fm.push(`starred: ${data.starred ? 'true' : 'false'}`);
-  if (data.how_we_met) fm.push(`how_we_met: ${toYamlValue(data.how_we_met)}`);
-  if (data.introduced_by) fm.push(`introduced_by: "[[${data.introduced_by}]]"`);
-  if (data.last_contact) fm.push(`last_contact: ${data.last_contact}`);
+  fm.push(data.how_we_met ? `how_we_met: ${toYamlValue(data.how_we_met)}` : 'how_we_met:');
+  fm.push(data.introduced_by ? `introduced_by: "[[${data.introduced_by}]]"` : 'introduced_by:');
+  fm.push(data.last_contact ? `last_contact: ${data.last_contact}` : 'last_contact:');
   if (data.tags?.length) {
     fm.push('tags:');
     fm.push(toYamlList(data.tags));
+  } else {
+    fm.push('tags: []');
   }
   fm.push(`created: ${now}`);
   fm.push(`updated: ${now}`);
   fm.push('---');
 
-  // Build company link for display
-  const companyLink = data.current_org ? `[[${safeCompanyName}]]` : '';
-  
   const sections: string[] = [
     `# ${data.name}`,
     '',
     '## Profile',
     data.profile || '',
-    '',
-    '## Company',
-    companyLink || '-',
     '',
     '## Career History',
     data.career_history || '',

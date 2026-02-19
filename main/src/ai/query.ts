@@ -112,3 +112,53 @@ export async function summarizeConversationHistory(
     return 'Failed to summarize conversation history.';
   }
 }
+
+const PROFILE_SUMMARY_PROMPT = `你是一个帮助 PE 投资专业人士管理人脉的 AI 助手。
+
+你将收到一位联系人的完整资料和对话记录。请生成一份简洁但内容充实的人物 profile 总结。
+
+要求：
+1. 用结构化的格式呈现（可以用 emoji + 粗体做小标题）
+2. 涵盖：基本信息、职业背景、专业领域、关系状态、近期互动要点
+3. 如果有对话记录，提炼出关键信息和值得注意的点
+4. 篇幅控制在 300-500 字左右
+5. 用中文回复
+6. 不要编造资料中没有的信息
+7. 直接输出总结，不要输出思考过程`;
+
+export async function generateProfileSummary(
+  contactName: string,
+  profileContent: string,
+  conversationSummaries: { date: string; summary: string }[]
+): Promise<string> {
+  let userMessage = `联系人姓名：${contactName}\n\n`;
+  userMessage += `===== 个人资料 =====\n${profileContent}\n\n`;
+
+  if (conversationSummaries.length > 0) {
+    userMessage += `===== 对话记录摘要 =====\n`;
+    for (const conv of conversationSummaries) {
+      userMessage += `[${conv.date}] ${conv.summary}\n`;
+    }
+  } else {
+    userMessage += `（暂无对话记录）\n`;
+  }
+
+  try {
+    const resp = await ai.chat.completions.create({
+      model: MODEL,
+      messages: [
+        { role: 'system', content: PROFILE_SUMMARY_PROMPT },
+        { role: 'user', content: userMessage },
+      ],
+      temperature: 0.3,
+    });
+
+    const raw = resp.choices[0]?.message?.content || '';
+    // Strip <think> blocks if present
+    const cleaned = raw.replace(/<think>[\s\S]*?<\/think>/g, '').trim();
+    return cleaned || 'Failed to generate profile summary.';
+  } catch (err) {
+    console.error('Profile summary generation error:', err);
+    return 'Failed to generate profile summary.';
+  }
+}
