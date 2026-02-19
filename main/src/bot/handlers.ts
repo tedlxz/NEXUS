@@ -46,8 +46,8 @@ function refreshStarredList(userId?: string): void {
 
 // Pending confirmations per user
 interface PendingAction {
-  type: 'new_contact' | 'log_conversation' | 'transcript' | 'transcript_contact_pending' | 'transcript_confirm_pending' | 'transcript_new_contact_confirm' | 'update_entity';
-  data: PersonData | ConversationData | { content: string; fileName: string; caption: string; extractedDate?: string } | { matches: Array<{name: string; info: string}>; originalName: string; transcriptData: { content: string; fileName: string; caption: string; extractedDate?: string } } | { confirmedNames: string[]; transcriptData: { content: string; fileName: string; caption: string; extractedDate?: string } } | { personData: PersonData; conversationData: ConversationData } | { name: string; isCompany: boolean; changes: Record<string, unknown>; description: string };
+  type: 'new_contact' | 'log_conversation' | 'transcript' | 'transcript_contact_pending' | 'transcript_confirm_pending' | 'transcript_new_contact_confirm' | 'update_entity' | 'enrich_contact';
+  data: PersonData | ConversationData | { content: string; fileName: string; caption: string; extractedDate?: string } | { matches: Array<{name: string; info: string}>; originalName: string; transcriptData: { content: string; fileName: string; caption: string; extractedDate?: string } } | { confirmedNames: string[]; transcriptData: { content: string; fileName: string; caption: string; extractedDate?: string } } | { personData: PersonData; conversationData: ConversationData } | { name: string; isCompany: boolean; changes: Record<string, unknown>; description: string } | { contactName: string; contactFile: string; enrichedData: Partial<PersonData>; existingContact: any };
   originalText: string;
   previewText: string;
 }
@@ -107,6 +107,8 @@ export async function confirmPendingAction(userId: number): Promise<string> {
     return '请告诉我联系人姓名。';
   } else if (pending.type === 'update_entity') {
     return executeUpdateEntity(pending.data as { name: string; isCompany: boolean; changes: Record<string, unknown>; description: string }, userId.toString());
+  } else if (pending.type === 'enrich_contact') {
+    return executeEnrichContact(pending.data as { contactName: string; contactFile: string; enrichedData: Partial<PersonData>; existingContact: any }, userId);
   }
 
   return 'Unknown action type.';
@@ -186,20 +188,13 @@ export async function handleMessage(text: string, userId: number): Promise<strin
     return await buildNewContactAndTranscriptPreview(contactInput, transcriptData, userId);
   }
 
-  // THEN: Do intent classification for regular messages
-  const intent = await classifyIntent(text);
-  console.log(`[Intent] ${intent.intent} (${intent.confidence})`);
-
-  if (intent.clarification_needed && intent.confidence < 0.5) {
-    return `I'm not sure what you'd like to do. ${intent.clarification_needed}`;
-  }
-
   // Check if user is confirming the matched contacts for transcript
+  // (must be checked BEFORE intent classification to avoid wasting API calls)
   if (pending?.type === 'transcript_confirm_pending') {
     const confirmData = pending.data as { confirmedNames: string[]; transcriptData: { content: string; fileName: string; caption: string; extractedDate?: string } };
-    
+
     const lower = text.trim().toLowerCase();
-    
+
     // User clicked "确认" - proceed with the confirmed names
     if (lower === '确认' || lower === '是' || lower === 'yes' || lower === 'y' || lower === '对' || lower === '对的') {
       // Use the first confirmed name (or handle multiple if needed)
@@ -213,7 +208,7 @@ export async function handleMessage(text: string, userId: number): Promise<strin
         confirmData.transcriptData.extractedDate
       );
     }
-    
+
     // User clicked "否" - ask them to re-enter the contact name
     if (lower === '否' || lower === 'no' || lower === 'n' || lower === '不是' || lower === '不对') {
       pendingActions.set(userId, {
@@ -224,22 +219,22 @@ export async function handleMessage(text: string, userId: number): Promise<strin
       });
       return `好的，请重新告诉我联系人姓名。`;
     }
-    
+
     // If user is trying to specify a different name, treat as new contact query
     return `请点击"确认"按钮确认联系人，或点击"否"重新输入姓名。`;
   }
-  
+
   // Check if user is confirming new contact + transcript
   if (pending?.type === 'transcript_new_contact_confirm') {
     const confirmData = pending.data as { personData: PersonData; conversationData: ConversationData };
     const lower = text.trim().toLowerCase();
-    
+
     if (lower === '确认' || lower === '是' || lower === 'yes' || lower === 'y' || lower === '对' || lower === '对的') {
       // User confirmed - create person AND save transcript
       pendingActions.delete(userId);
       return await executeNewContactWithTranscript(confirmData.personData, confirmData.conversationData, userId.toString());
     }
-    
+
     if (lower === '否' || lower === 'no' || lower === 'n' || lower === '不是' || lower === '不对') {
       // Go back to transcript_contact_pending so user can provide corrected description
       const transcriptContent = confirmData.conversationData.raw_transcript || '';
@@ -258,6 +253,14 @@ export async function handleMessage(text: string, userId: number): Promise<strin
     }
 
     return `请点击"确认"按钮确认，或点击"否"重新描述联系人信息。`;
+  }
+
+  // THEN: Do intent classification for regular messages
+  const intent = await classifyIntent(text);
+  console.log(`[Intent] ${intent.intent} (${intent.confidence})`);
+
+  if (intent.clarification_needed && intent.confidence < 0.5) {
+    return `I'm not sure what you'd like to do. ${intent.clarification_needed}`;
   }
 
   switch (intent.intent) {
@@ -504,7 +507,7 @@ async function handleLogConversation(text: string, intent: IntentResult, userId:
   let profileContext: string | undefined;
   if (existingContact) {
     const content = await vaultWriter.readFile(
-      path.join(process.cwd(), '..', existingContact.file)
+      path.join(config.vault.path, existingContact.file)
     );
     if (content) profileContext = content;
   }
@@ -634,14 +637,28 @@ async function executeLogConversation(convData: ConversationData, originalText: 
     }
   }
   
-  // Also update company file if contact has current_org
-  if (existingContact?.current_org) {
+  // Link contact to company if current_org is set (works for both new and existing contacts)
+  // Re-read the contact to get current_org (covers newly created contacts too)
+  const contactAfterSave = await indexManager.findByName(contactName);
+  const contactOrg = contactAfterSave?.current_org;
+  if (contactOrg) {
     await vaultWriter.addConversationToCompany(
-      existingContact.current_org,
+      contactOrg,
       convData.date,
       contactName,
       convData.ai_summary || ''
     );
+    // Create company DB record and link contact
+    if (contactId) {
+      try {
+        const { CompaniesRepo } = await import('../db/companies-repo');
+        const companiesRepo = new CompaniesRepo(getDb());
+        const companyId = companiesRepo.findOrCreateCompany(contactOrg);
+        companiesRepo.setContactCompany(contactId, companyId, 'current');
+      } catch (err) {
+        console.error('[LogConversation] Company link error:', err);
+      }
+    }
   }
 
   if (convData.action_items?.length) {
@@ -728,7 +745,7 @@ async function buildNewContactAndTranscriptPreview(
     preview += `\n---\n`;
     preview += `**对话日期:** ${transcriptData.extractedDate || new Date().toISOString().slice(0, 10)}\n`;
     preview += `**来源:** ${summary.source || 'Other'}\n`;
-    if (summary.ai_summary) preview += `**摘要:** ${summary.ai_summary.slice(150)}...\n`;
+    if (summary.ai_summary) preview += `**摘要:** ${summary.ai_summary.slice(0, 150)}...\n`;
     if (summary.key_topics?.length) preview += `**主题:** ${summary.key_topics.join(', ')}\n`;
     preview += `\n确认创建并归档这个对话吗？`;
     
@@ -849,7 +866,7 @@ async function createContactAndSaveTranscript(
     if (profileData.current_org) response += ` @ ${profileData.current_org}`;
     response += '\n';
     if (summary.ai_summary) {
-      response += `\n📝 Summary: ${summary.ai_summary.slice(100)}...`;
+      response += `\n📝 Summary: ${summary.ai_summary.slice(0, 100)}...`;
     }
     
     return response;
@@ -898,7 +915,7 @@ export async function executeNewContactWithTranscript(
     if (personData.current_org) response += ` @ ${personData.current_org}`;
     response += '\n';
     if (conversationData.ai_summary) {
-      response += `\n📝 对话摘要: ${conversationData.ai_summary.slice(100)}...`;
+      response += `\n📝 对话摘要: ${conversationData.ai_summary.slice(0, 100)}...`;
     }
 
     refreshDashboard(userId);
@@ -1164,26 +1181,56 @@ async function doEnrichContact(
     return `❌ 无法重新整理 **${contact.name}** 的资料，AI 未能生成有效结果。`;
   }
 
-  // 4. Update the vault file
-  await vaultWriter.updatePerson(contact.name, enriched);
+  // 4. Build preview and ask for confirmation
+  let preview = `📋 重新整理 **${contact.name}** 的资料：\n\n`;
+  if (enriched.current_role) preview += `**职位:** ${enriched.current_role}\n`;
+  if (enriched.current_org) preview += `**公司:** ${enriched.current_org}\n`;
+  if (enriched.industries?.length) preview += `**行业:** ${enriched.industries.join(', ')}\n`;
+  if (enriched.tags?.length) preview += `**标签:** ${enriched.tags.join(', ')}\n`;
+  if (enriched.profile) preview += `\n${enriched.profile.slice(0, 300)}...\n`;
+  preview += `\n确认更新？Reply **Y** to confirm or **N** to cancel.`;
 
-  // 5. Update the index
-  await indexManager.addOrUpdate({
-    name: contact.name,
-    file: contact.file,
-    current_role: enriched.current_role ?? contact.current_role,
-    current_org: enriched.current_org ?? contact.current_org,
-    industries: enriched.industries ?? contact.industries,
-    closeness: enriched.closeness ?? contact.closeness,
-    starred: enriched.starred ?? contact.starred,
-    tags: enriched.tags ?? contact.tags,
+  pendingActions.set(userId, {
+    type: 'enrich_contact',
+    data: {
+      contactName: contact.name,
+      contactFile: contact.file,
+      enrichedData: enriched,
+      existingContact: contact,
+    },
+    originalText: correction,
+    previewText: preview,
   });
 
-  // 6. Auto-create and link company record if current_org is set
-  const finalOrg = enriched.current_org ?? contact.current_org;
+  return preview;
+}
+
+async function executeEnrichContact(
+  data: { contactName: string; contactFile: string; enrichedData: Partial<PersonData>; existingContact: any },
+  userId: number
+): Promise<string> {
+  const { contactName, contactFile, enrichedData, existingContact } = data;
+
+  // 1. Update the vault file
+  await vaultWriter.updatePerson(contactName, enrichedData);
+
+  // 2. Update the index
+  await indexManager.addOrUpdate({
+    name: contactName,
+    file: contactFile,
+    current_role: enrichedData.current_role ?? existingContact.current_role,
+    current_org: enrichedData.current_org ?? existingContact.current_org,
+    industries: enrichedData.industries ?? existingContact.industries,
+    closeness: enrichedData.closeness ?? existingContact.closeness,
+    starred: enrichedData.starred ?? existingContact.starred,
+    tags: enrichedData.tags ?? existingContact.tags,
+  });
+
+  // 3. Auto-create and link company record if current_org is set
+  const finalOrg = enrichedData.current_org ?? existingContact.current_org;
   if (finalOrg) {
     try {
-      const cId = await indexManager.getContactId(contact.name);
+      const cId = await indexManager.getContactId(contactName);
       if (cId) {
         const db = getDb();
         const { CompaniesRepo } = await import('../db/companies-repo');
@@ -1196,24 +1243,21 @@ async function doEnrichContact(
     }
   }
 
-  // 7. Build response
-  let response = `✅ 已重新整理 **${contact.name}** 的资料。\n\n`;
-  if (enriched.current_role) response += `📋 ${enriched.current_role}`;
-  if (enriched.current_org) response += ` @ ${enriched.current_org}`;
-  if (enriched.current_role || enriched.current_org) response += '\n';
-  if (enriched.industries?.length) response += `🏭 ${enriched.industries.join(', ')}\n`;
-  if (enriched.tags?.length) response += `🏷 ${enriched.tags.join(', ')}\n`;
-  if (enriched.profile) response += `\n${enriched.profile.slice(0, 200)}...`;
-
-  // Note: No bot restart needed for profile enrichment - data is saved to vault
-  // Dashboard will be refreshed below
+  // 4. Build response
+  let response = `✅ 已重新整理 **${contactName}** 的资料。\n\n`;
+  if (enrichedData.current_role) response += `📋 ${enrichedData.current_role}`;
+  if (enrichedData.current_org) response += ` @ ${enrichedData.current_org}`;
+  if (enrichedData.current_role || enrichedData.current_org) response += '\n';
+  if (enrichedData.industries?.length) response += `🏭 ${enrichedData.industries.join(', ')}\n`;
+  if (enrichedData.tags?.length) response += `🏷 ${enrichedData.tags.join(', ')}\n`;
+  if (enrichedData.profile) response += `\n${enrichedData.profile.slice(0, 200)}...`;
 
   refreshDashboard(userId.toString());
   refreshStarredList(userId.toString());
 
   // Record action for context
-  recordAction(userId, 'enrich_contact', `重新整理联系人: ${contact.name}`, {
-    contact: contact.name,
+  recordAction(userId, 'enrich_contact', `重新整理联系人: ${contactName}`, {
+    contact: contactName,
   });
 
   return response;
@@ -1300,7 +1344,7 @@ async function handleQuery(text: string, intent: IntentResult): Promise<string> 
   }
 
   // Step 2: If asking about conversation history, search and summarize
-  if (queryType === 'conversation_history' || topic) {
+  if (queryType === 'conversation_history') {
     return handleConversationQuery(resolvedContact, topic || text, text);
   }
 
@@ -1864,10 +1908,11 @@ export async function handleDeleteContact(name: string, userId?: string): Promis
     return `I don't have a contact named "${name}".`;
   }
 
-  // Delete from database
+  // Delete from database and in-memory index
   const db = getDb();
   const contactsRepo = new ContactsRepo(db);
   contactsRepo.remove(name);
+  await indexManager.remove(name);
 
   // Delete from Vault (Obsidian file)
   const filePath = path.join(config.vault.path, existing.file);

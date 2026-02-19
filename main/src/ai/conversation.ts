@@ -12,7 +12,7 @@ Return ONLY valid JSON:
   "mentioned_companies": ["Company A", "Company B"],
   "mentioned_people": ["[[Person Name]] — context of mention"],
   "mentioned_deals": ["Deal/project name — status or context"],
-  "company_tags": ["Industry tags like 新能源, 隔膜, 半导体, etc. - industries or sectors mentioned"],
+  "company_tags": ["Actual company names mentioned in the conversation, e.g. 宁德时代, Tesla, 阳光电源. Only real company/organization names, NOT industry sectors or generic terms."],
   "action_items": [
     {
       "description": "What needs to be done",

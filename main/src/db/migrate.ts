@@ -62,8 +62,8 @@ export function runMigrationIfNeeded(db: Database.Database): void {
             contact.last_contact || null
           );
 
+          if (result.changes === 0) continue; // Already existed (IGNORE)
           const contactId = result.lastInsertRowid as number;
-          if (contactId === 0) continue; // Already existed (IGNORE)
 
           // Insert industries
           if (contact.industries?.length) {
@@ -164,7 +164,12 @@ export function runMigrationIfNeeded(db: Database.Database): void {
   const v3Row = db.prepare('SELECT MAX(version) as ver FROM schema_version').get() as any;
   if ((v3Row?.ver ?? 0) < 3) {
     console.log('[Migration] v2 → v3: Adding starred column...');
-    db.exec('ALTER TABLE contacts ADD COLUMN starred INTEGER NOT NULL DEFAULT 0');
+    try {
+      db.exec('ALTER TABLE contacts ADD COLUMN starred INTEGER NOT NULL DEFAULT 0');
+    } catch (err: any) {
+      // Column may already exist if schema DDL created it
+      if (!err.message?.includes('duplicate column')) throw err;
+    }
     db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(3);
     console.log('[Migration] v3 complete.');
   }
@@ -173,7 +178,12 @@ export function runMigrationIfNeeded(db: Database.Database): void {
   const v4Row = db.prepare('SELECT MAX(version) as ver FROM schema_version').get() as any;
   if ((v4Row?.ver ?? 0) < 4) {
     console.log('[Migration] v3 → v4: Adding starred column to companies...');
-    db.exec('ALTER TABLE companies ADD COLUMN starred INTEGER NOT NULL DEFAULT 0');
+    try {
+      db.exec('ALTER TABLE companies ADD COLUMN starred INTEGER NOT NULL DEFAULT 0');
+    } catch (err: any) {
+      // Column may already exist if schema DDL created it
+      if (!err.message?.includes('duplicate column')) throw err;
+    }
     db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(4);
     console.log('[Migration] v4 complete.');
   }

@@ -88,7 +88,7 @@ export class VaultWriter {
     const exists = await fileExists(filePath);
     if (!exists) {
       // Create new if doesn't exist
-      await this.createPerson({ name, ...updates });
+      await this.createPerson({ name, ...updates }, userId);
       return;
     }
 
@@ -154,9 +154,10 @@ export class VaultWriter {
     return filePath;
   }
 
-  async appendDailyNote(message: string, result: string): Promise<void> {
+  async appendDailyNote(message: string, result: string, userId?: string): Promise<void> {
+    const paths = userId ? getUserVaultPaths(userId) : vaultPaths;
     const today = new Date().toISOString().slice(0, 10);
-    const filePath = path.join(vaultPaths.daily, `${today}.md`);
+    const filePath = path.join(paths.daily, `${today}.md`);
     const timestamp = new Date().toLocaleTimeString('en-US', { hour12: false });
 
     const exists = await fileExists(filePath);
@@ -200,9 +201,10 @@ export class VaultWriter {
     }
   }
 
-  async listPeople(): Promise<string[]> {
+  async listPeople(userId?: string): Promise<string[]> {
     try {
-      const files = await fs.readdir(vaultPaths.people);
+      const paths = userId ? getUserVaultPaths(userId) : vaultPaths;
+      const files = await fs.readdir(paths.people);
       return files.filter(f => f.endsWith('.md')).map(f => f.replace('.md', ''));
     } catch {
       return [];
@@ -239,8 +241,9 @@ export class VaultWriter {
     userId?: string
   ): Promise<string> {
     // Sanitize company name for filename (remove invalid characters)
+    const paths = userId ? getUserVaultPaths(userId) : vaultPaths;
     const safeName = companyName.replace(/[<>:"/\\|?*]/g, ' ');
-    const filePath = path.join(vaultPaths.companies, `${safeName}.md`);
+    const filePath = path.join(paths.companies, `${safeName}.md`);
     const data = {
       name: companyName,
       industry,
@@ -344,7 +347,9 @@ function replaceSection(body: string, sectionName: string, newContent: string): 
   const match = body.match(regex);
   if (match) {
     const ending = match[3] || '';
-    return body.replace(regex, `$1${newContent}\n\n${ending}`);
+    // ending already starts with \n if there's a next section, so only add one \n
+    const separator = ending.startsWith('\n') ? '\n' : '\n\n';
+    return body.replace(regex, `$1${newContent}${separator}${ending}`);
   }
   return body;
 }
@@ -359,7 +364,8 @@ function appendToSection(body: string, sectionName: string, newContent: string):
     const existing = match[2].trim();
     const ending = match[3] || '';
     const combined = existing ? `${existing}\n${newContent}` : newContent;
-    return body.replace(regex, `$1${combined}\n\n${ending}`);
+    const separator = ending.startsWith('\n') ? '\n' : '\n\n';
+    return body.replace(regex, `$1${combined}${separator}${ending}`);
   }
   return body;
 }
@@ -474,11 +480,10 @@ export async function generateDataDashboard(userId?: string): Promise<string> {
   for (const company of allCompanies) {
     const companyData = companiesRepo.findByName(company.name);
     if (!companyData) continue;
-    
-    // Count related contacts
-    const allContactsData = contactsRepo.getAll();
+
+    // Count related contacts (reuse allContacts fetched above)
     let relatedCount = 0;
-    for (const c of allContactsData) {
+    for (const c of allContacts) {
       if (c.current_org?.toLowerCase() === company.name.toLowerCase()) {
         relatedCount++;
       }

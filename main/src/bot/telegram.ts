@@ -323,8 +323,8 @@ export function createBot(): Telegraf {
     const confirmData = pending.data as { personData: PersonData; conversationData: ConversationData };
     
     // Execute the creation
-    const result = await executeNewContactWithTranscript(confirmData.personData, confirmData.conversationData);
-    
+    const result = await executeNewContactWithTranscript(confirmData.personData, confirmData.conversationData, userId.toString());
+
     pendingActions.delete(userId);
     await ctx.reply(result);
   });
@@ -373,7 +373,7 @@ export function createBot(): Telegraf {
     try {
       // Check if user has a pending Y/N confirmation
       const pending = getPendingAction(userId);
-      if (pending && (pending.type === 'new_contact' || pending.type === 'log_conversation' || pending.type === 'transcript' || pending.type === 'update_entity')) {
+      if (pending && (pending.type === 'new_contact' || pending.type === 'log_conversation' || pending.type === 'transcript' || pending.type === 'update_entity' || pending.type === 'enrich_contact')) {
         const lower = text.trim().toLowerCase();
         if (lower === 'y' || lower === 'yes' || lower === '是' || lower === '确认') {
           await ctx.sendChatAction('typing');
@@ -465,7 +465,8 @@ export function createBot(): Telegraf {
     const allowedTypes = ['text/plain', 'text/markdown', 'text/csv', 'application/octet-stream'];
     const textExts = ['.txt', '.md', '.csv', '.text', '.log'];
     const fileName = doc.file_name || '';
-    const ext = fileName.substring(fileName.lastIndexOf('.')).toLowerCase();
+    const dotIdx = fileName.lastIndexOf('.');
+    const ext = dotIdx >= 0 ? fileName.substring(dotIdx).toLowerCase() : '';
     const isTextFile = allowedTypes.includes(doc.mime_type || '') || textExts.includes(ext);
 
     if (!isTextFile) {
@@ -536,20 +537,34 @@ async function sendReply(ctx: Context, text: string, withButtons: boolean = fals
     ? stripped.replace(/\n*Reply \*\*Y\*\*.*confirm.*cancel\./i, '').replace(/\n*回复.*确认.*取消.*/i, '').replace(/\n*确认修改？$/i, '').trimEnd()
     : stripped;
 
-  if (cleanText.length > 4000) {
-    const chunks = splitMessage(cleanText, 4000);
-    for (let i = 0; i < chunks.length; i++) {
-      const isLast = i === chunks.length - 1;
-      if (isLast && withButtons) {
-        await ctx.reply(chunks[i], { parse_mode: 'Markdown', ...confirmKeyboard });
-      } else {
-        await ctx.reply(chunks[i], { parse_mode: 'Markdown' });
+  try {
+    if (cleanText.length > 4000) {
+      const chunks = splitMessage(cleanText, 4000);
+      for (let i = 0; i < chunks.length; i++) {
+        const isLast = i === chunks.length - 1;
+        if (isLast && withButtons) {
+          await ctx.reply(chunks[i], { parse_mode: 'Markdown', ...confirmKeyboard });
+        } else {
+          await ctx.reply(chunks[i], { parse_mode: 'Markdown' });
+        }
       }
+    } else if (withButtons) {
+      await ctx.reply(cleanText, { parse_mode: 'Markdown', ...confirmKeyboard });
+    } else {
+      await ctx.reply(cleanText, { parse_mode: 'Markdown' });
     }
-  } else if (withButtons) {
-    await ctx.reply(cleanText, { parse_mode: 'Markdown', ...confirmKeyboard });
-  } else {
-    await ctx.reply(cleanText, { parse_mode: 'Markdown' });
+  } catch (err) {
+    // Markdown parsing failed (unbalanced *, _, etc.) — fall back to plain text
+    console.error('[sendReply] Markdown parse failed, falling back to plain text:', (err as Error).message);
+    try {
+      if (withButtons) {
+        await ctx.reply(cleanText, { ...confirmKeyboard });
+      } else {
+        await ctx.reply(cleanText);
+      }
+    } catch (err2) {
+      console.error('[sendReply] Plain text also failed:', err2);
+    }
   }
 }
 
@@ -569,6 +584,12 @@ function downloadFile(url: string, proxy?: string): Promise<string> {
     }
 
     const req = https.request(options, (res) => {
+      const statusCode = res.statusCode || 0;
+      if (statusCode < 200 || statusCode >= 300) {
+        reject(new Error(`HTTP ${statusCode} downloading file`));
+        res.resume(); // drain response
+        return;
+      }
       const chunks: Buffer[] = [];
       res.on('data', (chunk: Buffer) => chunks.push(chunk));
       res.on('end', () => {

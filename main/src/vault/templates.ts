@@ -3,8 +3,13 @@ import { PersonData, ConversationData, ResearchData, ActionItemInput, CompanyNot
 function toYamlValue(val: string): string {
   // Always wrap in quotes to avoid YAML parsing issues
   if (!val) return '""';
-  // Escape existing quotes and wrap in quotes
-  return `"${val.replace(/"/g, '\\"')}"`;
+  // Escape backslashes, double quotes, and newlines for valid YAML double-quoted strings
+  const escaped = val
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .replace(/\r/g, '\\r');
+  return `"${escaped}"`;
 }
 
 function toYamlList(items: string[], indent = 2): string {
