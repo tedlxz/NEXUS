@@ -2,7 +2,7 @@
 
 > Personal Network Management for Private Equity Professionals
 
-![Version](https://img.shields.io/badge/version-0.3.0-blue)
+![Version](https://img.shields.io/badge/version-0.3.4-blue)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-green)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
@@ -346,6 +346,22 @@ NEXUS will automatically run migrations on startup. If you see migration errors:
 Private - All rights reserved
 
 ## Changelog
+
+### v0.3.4 (2026-02-19)
+- 移除所有不必要的 bot 重启
+- 添加/更新/删除联系人不自动重启，只增量同步
+- 全局上下文管理模块：支持 follow-up 理解
+- 新增 news_search intent：按需搜索公司新闻
+- 新增 clear_context intent：清除上下文
+- 修复 Telegram Markdown 解析错误
+- enrich_contact 不再重启 bot
+
+### v0.3.3 (2026-02-19)
+- 新增 enrich_contact 功能：重新整理联系人资料
+- 新增 AI Profile Summary 生成
+
+### v0.3.2 (2026-02-18)
+- 协作手册 (collaboration-guide.md)
 
 ### v0.3.0 (2026-02-18)
 - Added NEXUS Launcher macOS native application
