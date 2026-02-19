@@ -14,6 +14,19 @@ import { ConversationsRepo } from '../db/conversations-repo';
 import { ContactsRepo } from '../db/contacts-repo';
 import { extractKeywords } from '../db/search';
 import { restartBot } from './restart';
+import {
+  recordAction,
+  getContextSummary,
+  getChatHistory,
+  addChatMessage,
+  clearChatHistory as clearContextChatHistory,
+  clearAllContext,
+  getLastAction,
+  getLastCompanies,
+  isFollowUp,
+  getRecentActions,
+  type ActionType,
+} from '../context';
 import path from 'path';
 import fs from 'fs/promises';
 
@@ -66,16 +79,9 @@ const pendingActions = new Map<number, PendingAction>();
 
 export { pendingActions };
 
-// Per-user chat history for multi-turn conversation context
-interface ChatMessage {
-  role: 'user' | 'assistant';
-  content: string;
-}
-const MAX_HISTORY = 20; // 10 user+assistant turn pairs
-const chatHistory = new Map<number, ChatMessage[]>();
-
+// Legacy function for backward compatibility
 export function clearChatHistory(userId: number): void {
-  chatHistory.delete(userId);
+  clearContextChatHistory(userId);
 }
 
 export function getPendingAction(userId: number): PendingAction | undefined {
@@ -264,11 +270,15 @@ export async function handleMessage(text: string, userId: number): Promise<strin
     case 'enrich_contact':
       return handleEnrichContact(text, intent, userId);
     case 'brainstorm':
-      return handleBrainstorm(text, intent);
+      return handleBrainstorm(text, intent, userId);
     case 'query':
       return handleQuery(text, intent);
     case 'action_item':
-      return handleActionItem(text, intent);
+      return handleActionItem(text, intent, userId);
+    case 'news_search':
+      return handleNewsSearch(text, intent, userId);
+    case 'clear_context':
+      return handleClearContext(text, intent, userId);
     case 'daily_note':
     default:
       return handleChat(text, userId);
@@ -473,6 +483,17 @@ async function executeNewContact(profileData: PersonData, userId?: string): Prom
 
   refreshDashboard(userId);
   refreshStarredList(userId);
+
+  // Record action for context
+  const userIdNum = userId ? parseInt(userId) : 0;
+  if (userIdNum) {
+    recordAction(userIdNum, 'new_contact', `新建联系人: ${profileData.name}`, {
+      contact: profileData.name,
+      company: profileData.current_org,
+      role: profileData.current_role,
+    });
+  }
+
   return response;
 }
 
@@ -669,6 +690,17 @@ async function executeLogConversation(convData: ConversationData, originalText: 
 
   refreshDashboard(userId);
   refreshStarredList(userId);
+
+  // Record action for context
+  const userIdNum = userId ? parseInt(userId) : 0;
+  if (userIdNum) {
+    recordAction(userIdNum, 'conversation_log', `记录对话: ${contactName}`, {
+      conversationWith: contactName,
+      date: convData.date,
+      topics: convData.key_topics,
+    });
+  }
+
   return response;
 }
 
@@ -1004,6 +1036,16 @@ async function executeUpdateEntity(data: { name: string; isCompany: boolean; cha
 
     refreshDashboard(userId);
     refreshStarredList(userId);
+
+    // Record action for context
+    const userIdNum = userId ? parseInt(userId) : 0;
+    if (userIdNum) {
+      recordAction(userIdNum, 'update_contact', `更新公司: ${name}`, {
+        companies: [name],
+        changes: Object.keys(changes),
+      });
+    }
+
     return response;
   }
 
@@ -1065,6 +1107,16 @@ async function executeUpdateEntity(data: { name: string; isCompany: boolean; cha
 
   refreshDashboard(userId);
   refreshStarredList(userId);
+
+  // Record action for context
+  const userIdNum = userId ? parseInt(userId) : 0;
+  if (userIdNum) {
+    recordAction(userIdNum, 'update_contact', `更新联系人: ${name}`, {
+      contact: name,
+      changes: Object.keys(changes),
+    });
+  }
+
   return response;
 }
 
@@ -1183,6 +1235,12 @@ async function doEnrichContact(
 
   refreshDashboard(userId.toString());
   refreshStarredList(userId.toString());
+
+  // Record action for context
+  recordAction(userId, 'enrich_contact', `重新整理联系人: ${contact.name}`, {
+    contact: contact.name,
+  });
+
   return response;
 }
 
@@ -1190,10 +1248,10 @@ export async function handleBrainstormCommand(query: string, userId?: string): P
   return runBrainstorm(query, query, userId);
 }
 
-async function handleBrainstorm(text: string, intent: IntentResult, userId?: string): Promise<string> {
+async function handleBrainstorm(text: string, intent: IntentResult, userId?: number): Promise<string> {
   const topic = (intent.extracted_data.topic as string) || text;
   const description = (intent.extracted_data.description as string) || text;
-  return runBrainstorm(topic, description, userId);
+  return runBrainstorm(topic, description, userId?.toString());
 }
 
 async function runBrainstorm(topic: string, description: string, userId?: string): Promise<string> {
@@ -1225,6 +1283,16 @@ async function runBrainstorm(topic: string, description: string, userId?: string
   }
   if (result.expansion_suggestions) {
     response += `\n💡 See Research/${topic}.md for expansion suggestions.`;
+  }
+
+  // Record action for context
+  const userIdNum = userId ? parseInt(userId) : 0;
+  if (userIdNum) {
+    const contacts = result.recommendations.map(r => r.name);
+    recordAction(userIdNum, 'brainstorm', `头脑风暴: ${topic}`, {
+      topic,
+      contacts,
+    });
   }
 
   return response;
@@ -1441,7 +1509,86 @@ async function handleConversationQuery(
   return response;
 }
 
-async function handleActionItem(text: string, intent: IntentResult): Promise<string> {
+/**
+ * Handle news search request - search for company/person news on demand
+ */
+async function handleNewsSearch(text: string, intent: IntentResult, userId: number): Promise<string> {
+  const company = (intent.extracted_data.company as string) || text;
+  const topic = (intent.extracted_data.topic as string) || '';
+
+  if (!company) {
+    return '请告诉我你想搜索哪家公司或哪个人的新闻？';
+  }
+
+  try {
+    // Check if this is a follow-up to previous newsflow
+    const lastCompanies = getLastCompanies(userId);
+    const isFollowUp = lastCompanies.length > 0 && lastCompanies.includes(company);
+
+    // Build search query
+    const searchQuery = topic ? `${company} ${topic}` : `${company} 新闻`;
+    
+    // Use Brave Search
+    const { braveSearch } = await import('../search/brave');
+    const results = await braveSearch(searchQuery, 10);
+
+    if (results.length === 0) {
+      return `没有找到关于 **${company}** 的新闻结果。`;
+    }
+
+    // Format results
+    let response = `📰 关于 **${company}** 的新闻：\n\n`;
+    
+    // Add date filter hint if this is a follow-up asking for recent news
+    if (text.includes('近') || text.includes('最近') || text.includes('最新')) {
+      response += `（以下为近期新闻）\n\n`;
+    }
+
+    for (const r of results.slice(0, 8)) {
+      response += `• **${r.title}**\n`;
+      if (r.description) {
+        response += `  ${r.description.slice(100)}...\n`;
+      }
+      if (r.age) {
+        response += `  🕐 ${r.age}\n`;
+      }
+      response += `  🔗 ${r.url}\n\n`;
+    }
+
+    // Record this action for context
+    recordAction(userId, 'news_search', `搜索 ${company} 的新闻`, {
+      companies: [company],
+      searchQuery,
+      resultsCount: results.length,
+      isFollowUp,
+    });
+
+    return response;
+  } catch (err) {
+    console.error('[NewsSearch Error]', err);
+    return `搜索 **${company}** 新闻失败：${err}`;
+  }
+}
+
+/**
+ * Handle clear context request
+ */
+async function handleClearContext(text: string, intent: IntentResult, userId: number): Promise<string> {
+  const lowerText = text.toLowerCase();
+  
+  // Check if user wants to clear everything or just chat history
+  const clearAll = lowerText.includes('all') || lowerText.includes('全部') || lowerText.includes('清空');
+  
+  if (clearAll) {
+    clearAllContext(userId);
+    return '✅ 已清除所有对话上下文和历史记录。';
+  } else {
+    clearChatHistory(userId);
+    return '✅ 已清除对话历史，保留了之前的操作记录。';
+  }
+}
+
+async function handleActionItem(text: string, intent: IntentResult, userId?: number): Promise<string> {
   const description = (intent.extracted_data.description as string) || text;
   const contact = (intent.extracted_data.contact as string) || undefined;
   const dueDate = (intent.extracted_data.due_date as string) || undefined;
@@ -1458,6 +1605,15 @@ async function handleActionItem(text: string, intent: IntentResult): Promise<str
   if (item.contact) response += ` (${item.contact})`;
   if (item.due_date) response += `\n📅 Due: ${item.due_date}`;
   response += `\n🆔 ${item.id}`;
+
+  // Record action for context
+  if (userId) {
+    recordAction(userId, 'action_item', `添加行动项: ${description.slice(0, 30)}`, {
+      description,
+      contact,
+      dueDate,
+    });
+  }
 
   return response;
 }
@@ -1502,9 +1658,14 @@ async function handleChat(text: string, userId: number): Promise<string> {
   try {
     const { ai, MODEL } = await import('../ai/client');
 
+    // Check if this is a follow-up to previous action
+    const followUp = isFollowUp(userId, text);
+    const contextSummary = getContextSummary(userId);
+    const lastAction = getLastAction(userId);
+
     // Step 1: Determine if search is needed
     const { needs_search, search_query } = await detectSearchNeed(text);
-    console.log(`[Chat] needs_search=${needs_search}, query="${search_query}"`);
+    console.log(`[Chat] needs_search=${needs_search}, query="${search_query}", followUp=${followUp}`);
 
     let systemPrompt: string;
 
@@ -1518,23 +1679,31 @@ async function handleChat(text: string, userId: number): Promise<string> {
           .map((r, i) => `[${i + 1}] ${r.title}\n${r.description}${r.age ? ` (${r.age})` : ''}\nURL: ${r.url}`)
           .join('\n\n');
 
+        // Add context summary to search results
+        const contextSection = contextSummary 
+          ? `\n\n## 对话上下文\n${contextSummary}\n\n` 
+          : '';
+
         systemPrompt = `你是 NEXUS，一个帮助 PE 投资专业人士管理人脉和对话的 AI 助手。
 
 以下是从互联网搜索到的参考资料：
 ---
 ${searchContext}
----
-
+---${contextSection}
 请基于以上搜索结果回答用户的问题。要求：
 1. 综合多个来源的信息给出全面的回答
 2. 在回答中标注信息来源（用 [1] [2] 等编号引用）
 3. 在回答末尾列出参考链接
 4. 用和用户相同的语言回复
-5. 回答要简洁实用，直接输出答案`;
+5. 回答要简洁实用，直接输出答案
+6. 如果用户的问题是针对之前的搜索结果的补充问题（follow-up），请根据上下文理解用户意图`;
       } else {
         // Search returned no results, fall back to pure chat
-        systemPrompt = `你是 NEXUS，一个帮助 PE 投资专业人士管理人脉和对话的 AI 助手。你可以自然地和用户对话，回答问题，提供建议。
+        const contextSection = contextSummary 
+          ? `\n\n## 对话上下文\n${contextSummary}\n\n` 
+          : '';
 
+        systemPrompt = `你是 NEXUS，一个帮助 PE 投资专业人士管理人脉和对话的 AI 助手。你可以自然地和用户对话，回答问题，提供建议。${contextSection}
 用户可能会用中文或英文跟你聊天。请用和用户相同的语言回复。
 
 回答要简洁实用，不要过于冗长。直接输出答案，不要输出思考过程、推理步骤或分析过程。
@@ -1543,16 +1712,21 @@ ${searchContext}
       }
     } else {
       // No search needed — pure chat
-      systemPrompt = `你是 NEXUS，一个帮助 PE 投资专业人士管理人脉和对话的 AI 助手。你可以自然地和用户对话，回答问题，提供建议。
+      const contextSection = contextSummary 
+        ? `\n\n## 对话上下文\n${contextSummary}\n\n` 
+        : '';
 
+      systemPrompt = `你是 NEXUS，一个帮助 PE 投资专业人士管理人脉和对话的 AI 助手。你可以自然地和用户对话，回答问题，提供建议。${contextSection}
 用户可能会用中文或英文跟你聊天。请用和用户相同的语言回复。
 
-回答要简洁实用，不要过于冗长。直接输出答案，不要输出思考过程、推理步骤或分析过程。`;
+回答要简洁实用，不要过于冗长。直接输出答案，不要输出思考过程、推理步骤或分析过程。
+
+如果用户的问题是针对之前的操作（如搜索某公司新闻）的补充问题（follow-up），请根据上下文理解用户意图并给出相关回答。`;
     }
 
-    // Step 3: Build messages with conversation history
-    const history = chatHistory.get(userId) || [];
-    history.push({ role: 'user', content: text });
+    // Step 3: Build messages with conversation history from context module
+    const history = getChatHistory(userId);
+    addChatMessage(userId, 'user', text);
 
     const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
       { role: 'system', content: systemPrompt },
@@ -1567,12 +1741,16 @@ ${searchContext}
 
     const reply = resp.choices[0]?.message?.content || '抱歉，我没有生成回复。';
 
-    // Save assistant reply to history and trim if needed
-    history.push({ role: 'assistant', content: reply });
-    if (history.length > MAX_HISTORY) {
-      history.splice(0, history.length - MAX_HISTORY);
+    // Save assistant reply to context
+    addChatMessage(userId, 'assistant', reply);
+
+    // Record this chat interaction if it's a follow-up or significant
+    if (followUp && lastAction) {
+      recordAction(userId, 'unknown', `Follow-up: ${text.slice(0, 50)}`, {
+        previousAction: lastAction.type,
+        query: text,
+      });
     }
-    chatHistory.set(userId, history);
 
     return reply;
   } catch (err) {

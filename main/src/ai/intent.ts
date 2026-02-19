@@ -9,6 +9,8 @@ export type Intent =
   | 'brainstorm'
   | 'query'
   | 'action_item'
+  | 'news_search'
+  | 'clear_context'
   | 'daily_note';
 
 export interface IntentResult {
@@ -30,7 +32,9 @@ Possible intents:
 5. "brainstorm" — User wants to find relevant people from their network for a topic
 6. "query" — User is querying info about a specific contact or past conversation that is ALREADY STORED in the Nexus system (e.g. "张三是做什么的？", "我上次和庞启智聊了什么？"). This is ONLY for looking up data in the contact database, NOT for general knowledge or web searches.
 7. "action_item" — User wants to add or update a to-do item
-8. "daily_note" — This is the DEFAULT fallback. Use this for: general chat, general knowledge questions, news searches, web searches, analysis requests, opinions, advice, or ANYTHING that doesn't clearly fit the above categories. Examples: "搜索Insta360的新闻", "帮我分析一下这个市场", "今天天气怎么样", "什么是PE基金"
+8. "news_search" — User wants to search for news or information about a specific company, person, or topic. Examples: "帮我搜索宁德时代的新闻", "有没有关于xxx公司的最新消息", "查一下Insta360", "搜索特斯拉财报"
+9. "clear_context" — User explicitly asks to clear conversation context or history. Examples: "清除上下文", "clear", "清空对话历史", "重新开始"
+10. "daily_note" — This is the DEFAULT fallback. Use this for: general chat, general knowledge questions, web searches, analysis requests, opinions, advice, or ANYTHING that doesn't clearly fit the above categories. Examples: "帮我分析一下这个市场", "今天天气怎么样", "什么是PE基金"
 
 Important rules:
 - Must accurately distinguish "new_contact" from "log_conversation"
@@ -56,7 +60,15 @@ Important rules:
   - "钱锦的信息不完整，他是阳光电源的战略投资总监" → enrich_contact with name: "钱锦", correction: "他是阳光电源的战略投资总监"
   - "帮我改进张三的profile，补充一下他的背景" → enrich_contact with name: "张三"
   - "重新识别一下李四的资料，公司应该是腾讯" → enrich_contact with name: "李四", correction: "公司应该是腾讯"
+  - "帮我搜索宁德时代的新闻" → news_search with company: "宁德时代"
+  - "查一下特斯拉最近的新闻" → news_search with company: "特斯拉"
+  - "有没有关于xxx公司的最新消息" → news_search with company: "xxx"
+  - "清除上下文" → clear_context
+  - "clear" → clear_context
+  - "重新开始" → clear_context
 - For "enrich_contact", extract: name (contact name), correction (the user's correction text or additional info, if provided)
+- For "news_search", extract: company (company name), topic (what to search for, optional)
+- For "clear_context", no extraction needed
 - For "new_contact", extract: name, current_role, current_org, industries, how_we_met, tags
 - For "log_conversation", extract: contact (name), source (communication channel)
 - For "query", extract: contact_ref (how user referred to the person, may be vague/partial), topic (what they want to know about), query_type ("conversation_history" if asking about past conversations, "contact_info" if asking about a person's info, "search" if general search)
@@ -94,7 +106,8 @@ export async function classifyIntent(
     // Validate intent is one of the known types
     const validIntents: Intent[] = [
       'new_contact', 'log_conversation', 'update_contact', 'enrich_contact',
-      'brainstorm', 'query', 'action_item', 'daily_note',
+      'brainstorm', 'query', 'action_item', 'news_search', 'clear_context',
+      'daily_note',
     ];
     if (!validIntents.includes(parsed.intent)) {
       parsed.intent = 'daily_note';
