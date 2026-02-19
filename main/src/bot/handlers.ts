@@ -1225,13 +1225,8 @@ async function doEnrichContact(
   if (enriched.tags?.length) response += `🏷 ${enriched.tags.join(', ')}\n`;
   if (enriched.profile) response += `\n${enriched.profile.slice(0, 200)}...`;
 
-  // Restart bot to sync
-  try {
-    await restartBot();
-    response += `\n\n🔄 已同步。`;
-  } catch (err) {
-    response += `\n\n⚠️ 资料已保存但同步失败。`;
-  }
+  // Note: No bot restart needed for profile enrichment - data is saved to vault
+  // Dashboard will be refreshed below
 
   refreshDashboard(userId.toString());
   refreshStarredList(userId.toString());
