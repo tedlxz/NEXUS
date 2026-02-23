@@ -187,4 +187,19 @@ export function runMigrationIfNeeded(db: Database.Database): void {
     db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(4);
     console.log('[Migration] v4 complete.');
   }
+
+  // v4 → v5: Add listed, market, ticker columns to companies
+  const v5Row = db.prepare('SELECT MAX(version) as ver FROM schema_version').get() as any;
+  if ((v5Row?.ver ?? 0) < 5) {
+    console.log('[Migration] v4 → v5: Adding listed, market, ticker columns to companies...');
+    try {
+      db.exec('ALTER TABLE companies ADD COLUMN listed INTEGER');
+      db.exec('ALTER TABLE companies ADD COLUMN market TEXT');
+      db.exec('ALTER TABLE companies ADD COLUMN ticker TEXT');
+    } catch (err: any) {
+      if (!err.message?.includes('duplicate column')) throw err;
+    }
+    db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(5);
+    console.log('[Migration] v5 complete.');
+  }
 }

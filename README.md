@@ -1,5 +1,11 @@
 ## 📦 v0.3.5 (2026-02-23)
 
+- Feature: auto-create companies from contacts with AI-listed detection
+
+---
+
+## 📦 v0.3.5 (2026-02-23)
+
 - Update: comprehensive README with prerequisites, credentials guide, and troubleshooting
 
 ---

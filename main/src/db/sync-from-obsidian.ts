@@ -7,6 +7,143 @@ import { CompaniesRepo } from './companies-repo';
 import { ConversationsRepo } from './conversations-repo';
 import { vaultPaths } from '../config';
 import { vaultWriter } from '../vault/writer';
+import { detectListedCompanyWithAI } from '../newsflow/services/starDataLoader';
+import type { StockMarket } from '../newsflow/types';
+
+/**
+ * Auto-create company from contact's current_org if it doesn't exist.
+ * Uses AI to detect if the company is listed and get ticker info.
+ */
+async function ensureCompanyFromContact(
+  companiesRepo: CompaniesRepo,
+  companyName: string
+): Promise<number> {
+  // Check if company already exists
+  const existing = companiesRepo.findByName(companyName);
+  if (existing && existing.id) {
+    return existing.id;
+  }
+
+  console.log(`[Sync] Creating new company from contact: ${companyName}`);
+
+  // Use AI to detect if listed
+  let isListed = false;
+  let ticker: string | undefined;
+  let market: 'us' | 'hk' | 'cn' | 'jp' | 'kr' | undefined;
+
+  try {
+    const result = await detectListedCompanyWithAI(companyName);
+    isListed = result.isListed;
+    ticker = result.ticker;
+    // Only use valid markets (filter out 'other' and any invalid values)
+    if (result.market && ['us', 'hk', 'cn', 'jp', 'kr'].includes(result.market)) {
+      market = result.market as 'us' | 'hk' | 'cn' | 'jp' | 'kr';
+    }
+    console.log(`[Sync] AI detection for ${companyName}: listed=${isListed}, ticker=${ticker}, market=${market}`);
+  } catch (err) {
+    console.error(`[Sync] AI detection failed for ${companyName}:`, err);
+  }
+
+  // Build description with ticker info
+  let description = '';
+  if (isListed && ticker && market) {
+    const marketNames: Record<string, string> = { us: 'US', hk: 'HK', cn: 'CN' };
+    description = `Listed on ${marketNames[market] || market} (${ticker})`;
+  }
+
+  // Create the company
+  const companyId = companiesRepo.upsertCompany({
+    name: companyName,
+    description: description || undefined,
+    listed: isListed,
+    ticker: ticker,
+    market: market,
+  });
+
+  // Also create the Obsidian file for the company
+  await createCompanyObsidianFile(companyName, isListed, ticker, market);
+
+  return companyId;
+}
+
+/**
+ * Create a company .md file in Obsidian if it doesn't exist
+ */
+async function createCompanyObsidianFile(
+  name: string,
+  isListed: boolean,
+  ticker?: string,
+  market?: 'us' | 'hk' | 'cn' | 'jp' | 'kr'
+): Promise<void> {
+  const companiesDir = vaultPaths.companies;
+  const fileName = `${name}.md`;
+  const filePath = path.join(companiesDir, fileName);
+
+  try {
+    await fs.access(filePath);
+    // File already exists
+    return;
+  } catch {
+    // File doesn't exist, create it
+  }
+
+  let tickerLine = '';
+  if (isListed && ticker && market) {
+    tickerLine = `ticker: ${ticker}\nmarket: ${market}\n`;
+  }
+
+  const content = `---
+type: company
+name: "${name}"
+${tickerLine}industries: []
+tags: []
+starred: false
+---
+
+# ${name}
+
+## Overview
+
+
+
+## Key Contacts
+
+
+
+## Recent News
+
+
+
+## Notes
+`;
+
+  await fs.writeFile(filePath, content, 'utf-8');
+  console.log(`[Sync] Created company file: ${fileName}`);
+}
+
+/**
+ * Update contact-company relationship in the database
+ */
+function updateContactCompanyRelationship(
+  db: ReturnType<typeof getDb>,
+  contactId: number,
+  companyId: number,
+  role?: string
+): void {
+  // Check if relationship already exists
+  const existing = db.prepare(`
+    SELECT id FROM contact_companies 
+    WHERE contact_id = ? AND company_id = ? AND relationship = 'current'
+  `).get(contactId, companyId) as { id: number } | undefined;
+
+  if (!existing) {
+    db.prepare(`
+      INSERT INTO contact_companies (contact_id, company_id, relationship, role)
+      VALUES (?, ?, 'current', ?)
+    `).run(contactId, companyId, role || null);
+    console.log(`[Sync] Linked contact ${contactId} to company ${companyId}`);
+  }
+}
 
 /**
  * Sync Obsidian vault changes back to SQL database.
@@ -70,6 +207,18 @@ export async function syncFromObsidian(): Promise<{
           industries,
           tags,
         });
+
+        // Auto-create company if current_org exists
+        if (current_org) {
+          await ensureCompanyFromContact(companiesRepo, current_org);
+          
+          // Update contact-company relationship
+          const company = companiesRepo.findByName(current_org);
+          const contact = contactsRepo.findByName(name);
+          if (company && contact && company.id && contact.id) {
+            updateContactCompanyRelationship(db, contact.id, company.id, current_role);
+          }
+        }
 
         contactsUpdated++;
       } catch (err) {
@@ -153,6 +302,7 @@ export async function syncFromObsidian(): Promise<{
 export async function syncSinglePerson(filePath: string): Promise<void> {
   const db = getDb();
   const contactsRepo = new ContactsRepo(db);
+  const companiesRepo = new CompaniesRepo(db);
 
   try {
     const content = await fs.readFile(filePath, 'utf-8');
@@ -169,6 +319,7 @@ export async function syncSinglePerson(filePath: string): Promise<void> {
     const industries = data.industries || [];
     const tags = data.tags || [];
 
+    // Upsert contact
     contactsRepo.upsert({
       name,
       file: `People/${file}`,
@@ -179,6 +330,18 @@ export async function syncSinglePerson(filePath: string): Promise<void> {
       industries,
       tags,
     });
+
+    // Auto-create company if current_org exists and doesn't already exist
+    if (current_org) {
+      await ensureCompanyFromContact(companiesRepo, current_org);
+      
+      // Update contact-company relationship
+      const company = companiesRepo.findByName(current_org);
+      const contact = contactsRepo.findByName(name);
+      if (company && contact && company.id && contact.id) {
+        updateContactCompanyRelationship(db, contact.id, company.id, current_role);
+      }
+    }
 
     console.log(`[Sync] Updated contact: ${name}`);
   } catch (err) {

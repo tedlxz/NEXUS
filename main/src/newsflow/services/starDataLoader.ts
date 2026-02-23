@@ -16,7 +16,7 @@ import { callMiniMax } from './newsSummarizer';
 /**
  * Use MiniMax AI to detect if company is listed and get ticker
  */
-async function detectListedCompanyWithAI(companyName: string): Promise<{
+export async function detectListedCompanyWithAI(companyName: string): Promise<{
   isListed: boolean;
   ticker?: string;
   market?: StockMarket;

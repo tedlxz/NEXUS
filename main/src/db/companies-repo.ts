@@ -9,6 +9,9 @@ export interface CompanyRow {
   website: string;
   description: string;
   starred: number;
+  listed: number | null;
+  market: string | null;
+  ticker: string | null;
 }
 
 export class CompaniesRepo {
@@ -21,10 +24,45 @@ export class CompaniesRepo {
     ).get(data.name) as { id: number } | undefined;
 
     if (existing) {
-      this.db.prepare(`
-        UPDATE companies SET industry = ?, website = ?, description = ?, starred = COALESCE(?, starred), updated = date('now')
-        WHERE id = ?
-      `).run(data.industry || null, data.website || null, data.description || null, data.starred !== undefined ? (data.starred ? 1 : 0) : null, existing.id);
+      // Build dynamic update query - always update if value is provided
+      const setClauses: string[] = [];
+      const values: any[] = [];
+
+      if (data.industry !== undefined) {
+        setClauses.push('industry = ?');
+        values.push(data.industry || null);
+      }
+      if (data.website !== undefined) {
+        setClauses.push('website = ?');
+        values.push(data.website || null);
+      }
+      if (data.description !== undefined) {
+        setClauses.push('description = ?');
+        values.push(data.description || null);
+      }
+      if (data.starred !== undefined) {
+        setClauses.push('starred = ?');
+        values.push(data.starred ? 1 : 0);
+      }
+      // Important: listed can be 0 (not listed), so check for !== undefined
+      if (data.listed !== undefined) {
+        setClauses.push('listed = ?');
+        values.push(data.listed ? 1 : 0);
+      }
+      if (data.market !== undefined) {
+        setClauses.push('market = ?');
+        values.push(data.market || null);
+      }
+      if (data.ticker !== undefined) {
+        setClauses.push('ticker = ?');
+        values.push(data.ticker || null);
+      }
+
+      if (setClauses.length > 0) {
+        setClauses.push('updated = date(\'now\')');
+        values.push(existing.id);
+        this.db.prepare(`UPDATE companies SET ${setClauses.join(', ')} WHERE id = ?`).run(...values);
+      }
       
       // Update tags if provided
       if (tags && tags.length > 0) {
@@ -34,9 +72,18 @@ export class CompaniesRepo {
     }
 
     const result = this.db.prepare(`
-      INSERT INTO companies (name, industry, website, description, starred)
-      VALUES (?, ?, ?, ?, ?)
-    `).run(data.name, data.industry || null, data.website || null, data.description || null, data.starred ? 1 : 0);
+      INSERT INTO companies (name, industry, website, description, starred, listed, market, ticker)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      data.name, 
+      data.industry || null, 
+      data.website || null, 
+      data.description || null, 
+      data.starred ? 1 : 0,
+      data.listed !== undefined ? (data.listed ? 1 : 0) : null,
+      data.market || null,
+      data.ticker || null
+    );
     
     const companyId = result.lastInsertRowid as number;
     
@@ -74,12 +121,16 @@ export class CompaniesRepo {
     if (!row) return undefined;
     const tags = this.getCompanyTags(row.id);
     return {
+      id: row.id,
       name: row.name,
       industry: row.industry,
       tags: tags.length > 0 ? tags : undefined,
       website: row.website,
       description: row.description,
       starred: row.starred === 1,
+      listed: row.listed === 1,
+      market: row.market,
+      ticker: row.ticker,
     };
   }
 
@@ -88,12 +139,16 @@ export class CompaniesRepo {
     return rows.map(row => {
       const tags = this.getCompanyTags(row.id);
       return {
+        id: row.id,
         name: row.name,
         industry: row.industry,
         tags: tags.length > 0 ? tags : undefined,
         website: row.website,
         description: row.description,
         starred: row.starred === 1,
+        listed: row.listed === 1,
+        market: row.market,
+        ticker: row.ticker,
       };
     });
   }

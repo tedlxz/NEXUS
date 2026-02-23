@@ -138,6 +138,7 @@ export interface ResearchData {
 }
 
 export interface ContactIndexEntry {
+  id?: number;
   name: string;
   file: string;
   current_role?: string;
@@ -153,6 +154,7 @@ export interface ContactIndexEntry {
 
 // Company-related types
 export interface CompanyData {
+  id?: number;
   name: string;
   industry?: string;
   tags?: string[];

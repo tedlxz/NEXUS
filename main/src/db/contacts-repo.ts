@@ -151,6 +151,7 @@ export class ContactsRepo {
     ).all(row.id) as any[];
 
     return {
+      id: row.id,
       name: row.name,
       file: row.file,
       current_role: row.current_role || undefined,
