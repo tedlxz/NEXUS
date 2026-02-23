@@ -55,6 +55,10 @@ function briefingToMarkdown(briefing: DailyBriefing): string {
     }
     company.articles.forEach((article, idx) => {
       lines.push(`${idx + 1}. [${article.title}](${article.url})`);
+      if (article.summary) {
+        const brief = article.summary.slice(0, 150).replace(/\n/g, ' ').trim();
+        if (brief) lines.push(`   > ${brief}...`);
+      }
       lines.push(`   - 来源: ${article.source} | ${article.publishedAt.slice(0, 10)}`);
     });
     lines.push('');

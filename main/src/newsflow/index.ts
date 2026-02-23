@@ -84,6 +84,40 @@ export async function runNewsflow(): Promise<NewsflowResult> {
       console.log(`[Newsflow] 2c. AKShare disabled, CN companies will use Google News fallback`);
     }
 
+    // 2c-post. Relevance filter: remove articles that don't actually mention the company
+    // AKShare (东方财富) returns "related industry" news that may be about other companies
+    for (const [companyName, data] of hkNews) {
+      const nameLower = companyName.toLowerCase();
+      // Build short name variants (e.g. "恩捷股份" → ["恩捷", "恩捷股份"])
+      const nameVariants = [nameLower];
+      if (nameLower.endsWith('股份') || nameLower.endsWith('科技') || nameLower.endsWith('集团')) {
+        nameVariants.push(nameLower.slice(0, -2));
+      }
+      const filtered = data.articles.filter(a => {
+        const text = `${a.title} ${a.summary || ''}`.toLowerCase();
+        return nameVariants.some(v => text.includes(v));
+      });
+      if (filtered.length < data.articles.length) {
+        console.log(`[Newsflow] Relevance filter: ${companyName} ${data.articles.length} → ${filtered.length} articles`);
+        data.articles = filtered;
+      }
+    }
+    for (const [companyName, data] of cnNews) {
+      const nameLower = companyName.toLowerCase();
+      const nameVariants = [nameLower];
+      if (nameLower.endsWith('股份') || nameLower.endsWith('科技') || nameLower.endsWith('集团')) {
+        nameVariants.push(nameLower.slice(0, -2));
+      }
+      const filtered = data.articles.filter(a => {
+        const text = `${a.title} ${a.summary || ''}`.toLowerCase();
+        return nameVariants.some(v => text.includes(v));
+      });
+      if (filtered.length < data.articles.length) {
+        console.log(`[Newsflow] Relevance filter: ${companyName} ${data.articles.length} → ${filtered.length} articles`);
+        data.articles = filtered;
+      }
+    }
+
     // 2d. Google News for:
     //   - Companies with market='other' (not listed / not US/HK/CN)
     //   - HK/CN companies that got 0 results from AKShare (fallback)

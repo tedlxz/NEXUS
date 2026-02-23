@@ -1,3 +1,9 @@
+## 📦 v0.3.4 (2026-02-23)
+
+- Fix: each user needs own Bot Token for multi-instance support
+
+---
+
 # NEXUS CRM
 
 > Personal Network Management for Private Equity Professionals

@@ -26,6 +26,11 @@ export function formatBriefingMessage(briefing: DailyBriefing): string {
       lines.push(`📌 *${company.name}*${ticker}`);
       company.articles.slice(0, 3).forEach((article, idx) => {
         lines.push(`   ${idx + 1}. ${article.title}`);
+        if (article.summary) {
+          // Show first ~100 chars of summary as a brief description
+          const brief = article.summary.slice(0, 100).replace(/\n/g, ' ').trim();
+          if (brief) lines.push(`      ${brief}...`);
+        }
       });
       if (company.hasMoreArticles) {
         lines.push(`   *↑ 该司今日动态较多，仅展示前3条*`);
@@ -45,6 +50,10 @@ export function formatBriefingMessage(briefing: DailyBriefing): string {
       lines.push(`📌 *${person.name}*${role}`);
       person.articles.slice(0, 2).forEach((article, idx) => {
         lines.push(`   ${idx + 1}. ${article.title}`);
+        if (article.summary) {
+          const brief = article.summary.slice(0, 100).replace(/\n/g, ' ').trim();
+          if (brief) lines.push(`      ${brief}...`);
+        }
       });
       lines.push(`   来源: Google News`);
       lines.push('');

@@ -77,7 +77,14 @@ async function summarizeArticles(articles: NewsArticle[]): Promise<string> {
   // Pre-filter articles with AI instructions
   const articlesText = articles
     .slice(0, 20)
-    .map((a, i) => `${i + 1}. ${a.title}`)
+    .map((a, i) => {
+      let line = `${i + 1}. ${a.title}`;
+      if (a.summary) {
+        const brief = a.summary.slice(0, 100).replace(/\n/g, ' ').trim();
+        if (brief) line += `\n   摘要: ${brief}`;
+      }
+      return line;
+    })
     .join('\n');
 
   const messages: MiniMaxMessage[] = [
@@ -193,7 +200,14 @@ export async function filterArticlesWithAI(
   const articlesText = companyEntries
     .map(([name, articles]) => {
       const numbered = articles
-        .map((a, i) => `  ${i + 1}. ${a.title}`)
+        .map((a, i) => {
+          let line = `  ${i + 1}. ${a.title}`;
+          if (a.summary) {
+            const brief = a.summary.slice(0, 80).replace(/\n/g, ' ').trim();
+            if (brief) line += ` — ${brief}`;
+          }
+          return line;
+        })
         .join('\n');
       return `【${name}】\n${numbered}`;
     })
@@ -202,7 +216,7 @@ export async function filterArticlesWithAI(
   const messages: MiniMaxMessage[] = [
     {
       role: 'system',
-      content: `你是一个专业的金融新闻编辑。请严格筛选新闻列表，只保留有价值的新闻。
+      content: `你是一个专业的金融新闻编辑。请严格筛选新闻列表，只保留有价值且与该公司直接相关的新闻。
 
 【必须过滤掉的新闻类型】
 1. 股价变动（涨跌、收盘价、开盘价、日内波动等）
@@ -211,6 +225,7 @@ export async function filterArticlesWithAI(
 4. 股票回购、分红派息
 5. 简单的行情播报、涨跌幅排行
 6. 期权、权证相关
+7. 与该公司无直接关系的新闻（例如：恩捷的新闻里出现的纯粹讲宁德时代的内容，应当过滤）
 
 【必须保留的新闻类型】
 1. 公司基本面变化（营收、利润、业务扩张/收缩）
@@ -219,6 +234,10 @@ export async function filterArticlesWithAI(
 4. 并购、融资、战略合作
 5. 监管动态、法律诉讼、重大风险
 6. 深度分析、行业趋势解读
+
+【关键规则】
+- 每条新闻必须与【】中标注的公司直接相关，而不仅仅是同行业的其他公司新闻
+- 如果一条新闻的标题和摘要完全没提到该公司，必须过滤
 
 【输出格式】
 对每个公司，只输出保留的编号，格式：公司名:编号1,编号2
@@ -300,7 +319,13 @@ export async function generateDailyBriefing(options: {
   
   const companiesSummary = companiesData
     .filter(d => d.articles.length > 0)
-    .map(d => `${d.name}: ${d.articles.map(a => a.title).join(', ')}`)
+    .map(d => {
+      const articleTexts = d.articles.map(a => {
+        if (a.summary) return `${a.title} — ${a.summary.slice(0, 60)}`;
+        return a.title;
+      });
+      return `${d.name}: ${articleTexts.join('; ')}`;
+    })
     .join('\n');
   
   const peopleSummary = personMatches

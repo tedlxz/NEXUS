@@ -12,6 +12,7 @@ import type { NewsArticle, Company } from '../types';
 
 interface AKShareNewsItem {
   title: string;
+  content: string;
   url: string;
   publish_date: string;
   source: string;
@@ -33,6 +34,7 @@ try:
         for _, row in news.head(5).iterrows():
             result.append({
                 'title': str(row.get('新闻标题', '')),
+                'content': str(row.get('新闻内容', ''))[:200],
                 'url': str(row.get('新闻链接', '')),
                 'publish_date': str(row.get('发布时间', '')),
                 'source': str(row.get('文章来源', 'AKShare'))
@@ -88,7 +90,7 @@ async function fetchCompanyNews(
         const articles: NewsArticle[] = data.map((item: AKShareNewsItem, index: number) => ({
           id: `${ticker}-${index}`,
           title: item.title || '',
-          summary: '',
+          summary: item.content || '',
           source: 'akshare',
           url: item.url || '',
           publishedAt: item.publish_date ? new Date(item.publish_date).toISOString() : new Date().toISOString(),
