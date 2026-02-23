@@ -1,3 +1,9 @@
+## 📦 v0.3.5 (2026-02-23)
+
+- Update: comprehensive README with prerequisites, credentials guide, and troubleshooting
+
+---
+
 ## 📦 v0.3.4 (2026-02-23)
 
 - Fix: each user needs own Bot Token for multi-instance support
@@ -8,7 +14,7 @@
 
 > Personal Network Management for Private Equity Professionals
 
-![Version](https://img.shields.io/badge/version-0.3.4-blue)
+![Version](https://img.shields.io/badge/version-0.3.5-blue)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-green)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
@@ -162,86 +168,169 @@ NEXUS uses a file watcher to keep Obsidian and SQLite in sync:
 - Changes via Telegram → automatically update Obsidian
 - Dashboard and Starred lists auto-refresh on any change
 
+## Prerequisites
+
+| Requirement | Version | How to install |
+|-------------|---------|----------------|
+| **Node.js** | v18+ | `brew install node` or [nodejs.org](https://nodejs.org) |
+| **Python3** | 3.9+ (optional) | `brew install python3` — only needed for AKShare financial data |
+| **Obsidian** | Any | [obsidian.md](https://obsidian.md) — free, for viewing your vault |
+
+> The install script will check all of these and guide you through installing anything that's missing.
+
 ## Quick Start
 
-### Option 1: NEXUS Launcher (Recommended for macOS)
+### Before You Begin: Get Your Credentials
 
-**Run the installer:**
+You'll need three things ready before running the installer:
+
+#### 1. Telegram Bot Token
+
+1. Open Telegram, search for **@BotFather**
+2. Send `/newbot`, follow the prompts to name your bot
+3. BotFather will give you a token like `123456:ABCdefGHI...` — save it
+
+#### 2. Your Telegram User ID
+
+1. Open Telegram, search for **@userinfobot**
+2. Start the bot — it will display your User ID (a number like `6573965713`)
+
+#### 3. MiniMax API Key
+
+1. Go to [MiniMax Platform](https://platform.minimax.io)
+2. Sign up or log in
+3. Create an API key (starts with `sk-`)
+4. Copy the key
+
+---
+
+### Option 1: One-Click Install (Recommended)
 
 ```bash
-# Clone the repository
+git clone https://github.com/tedlxz/NEXUS.git
+cd NEXUS/main
+bash install.sh
+```
+
+The script runs an 8-step automated pipeline with live progress display:
+
+```
+NEXUS CRM - 一键安装脚本
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[1/8] 环境检测          — checks Node.js, Python, PM2
+[2/8] 安装 PM2          — installs PM2 process manager if missing
+[3/8] 环境配置          — interactive wizard: Bot Token, Chat ID, API Key, Vault path
+[4/8] 网络检测          — auto-detects proxy (Clash/V2Ray/Shadowsocks)
+[5/8] 安装依赖          — npm install with spinner + timeout detection
+[6/8] 编译项目          — TypeScript compilation
+[7/8] 初始化 Vault      — creates Obsidian vault directory structure
+[8/8] 启动服务          — health check + PM2 launch
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ 安装完成！
+```
+
+**What the installer handles automatically:**
+
+- Missing Node.js → offers to install via Homebrew
+- Missing PM2 → installs globally (with sudo fallback)
+- Input validation → Bot Token format, Chat ID is a number, API Key non-empty
+- Proxy detection → tests common local proxy ports for Telegram connectivity
+- Vault creation → creates `People/`, `Conversations/`, `Companies/`, etc.
+- Health check → verifies the bot can start without crashing
+- PM2 launch → starts the bot with auto-restart and `pm2 save`
+
+If any step fails, the script shows the error details and specific fix suggestions instead of silently exiting.
+
+### Option 2: NEXUS Launcher (macOS App)
+
+```bash
 git clone https://github.com/tedlxz/NEXUS.git
 cd NEXUS
-
-# Run the installer
 chmod +x install_launcher.sh
 ./install_launcher.sh
 ```
 
-The installer will guide you through:
-1. Check and install required dependencies (Node.js, PM2)
-2. Configure your settings (User ID, API keys, Vault path)
-3. Build the project
-4. Start NEXUS service
+After installation, run the native macOS app from `main/launcher/NEXUS Launcher.app` for one-click start/stop with a status indicator.
 
-After installation, you can also run the macOS app from `main/launcher/NEXUS Launcher.app`.
+### Option 3: Manual Setup
 
-### Option 2: Command Line
+If you prefer full control, you can set everything up by hand:
 
 ```bash
-# Clone the repository
 git clone https://github.com/tedlxz/NEXUS.git
 cd NEXUS/main
 
-# Copy and edit configuration
+# 1. Create config from template
 cp .env.example .env
-nano .env  # Or use any text editor
 
-# Install dependencies and build
+# 2. Edit .env — fill in your Bot Token, User ID, API Key, Vault path
+nano .env
+
+# 3. Install dependencies
 npm install
+
+# 4. Install PM2 (required for npm run restart/stop/logs)
+npm install -g pm2
+
+# 5. Build TypeScript
 npm run build
 
-# Start the service
-npm start  # Uses PM2 for process management
+# 6. Start with PM2
+pm2 start ecosystem.config.js
+pm2 save
 ```
 
-### Configuration
+### Configuration Reference
 
-Create a `.env` file with the following:
+The `.env` file supports the following variables:
 
 ```bash
-# Telegram Bot (pre-configured - just press enter)
-TELEGRAM_BOT_TOKEN=8370700502:AAHp0RhLFREFqGmed8Xmd2pGy9NB9IcUMVM
+# ── Required ──────────────────────────────────────────
+TELEGRAM_BOT_TOKEN=123456:ABCdef...     # From @BotFather
+AUTHORIZED_USER_IDS=6573965713          # Your Telegram User ID
+MINIMAX_API_KEY=sk-...                  # From platform.minimax.io
 
-# Your User ID (REQUIRED - get from @userinfobot)
-AUTHORIZED_USER_IDS=your_user_id_here
+# ── Vault ─────────────────────────────────────────────
+VAULT_PATH_DEFAULT=~/Library/Mobile\ Documents/iCloud~md~obsidian/Documents/Nexus-Vault
+# Per-user vault (multi-user): VAULT_PATH_<USER_ID>=/path/to/vault
 
-# MiniMax API Key (REQUIRED - get from https://platform.minimax.io)
-MINIMAX_API_KEY=your_minimax_api_key_here
+# ── Network (optional) ───────────────────────────────
+TELEGRAM_PROXY=http://127.0.0.1:7890   # For China users (Clash/V2Ray)
 
-# Obsidian Vault Path (optional, defaults to iCloud Obsidian)
-VAULT_PATH=/path/to/your/Nexus-Vault
+# ── Newsflow (optional) ──────────────────────────────
+NEWSFLOW_CHAT_ID=6573965713             # Defaults to AUTHORIZED_USER_IDS
+FINNHUB_API_KEY=                        # US stock news
+AKSHARE_ENABLED=true                    # HK/CN stock news (requires Python)
+AKSHARE_PYTHON_PATH=python3
 
-# Telegram Proxy (optional, for China users)
-TELEGRAM_PROXY=http://127.0.0.1:7890
-
-# Newsflow Chat ID (optional, defaults to AUTHORIZED_USER_IDS)
-NEWSFLOW_CHAT_ID=your_user_id_here
+# ── Web Dashboard (optional) ─────────────────────────
+WEB_PASSWORD=your-secret-password
+PORT=3000
 ```
 
-### Getting Your User ID
+### Post-Install: Verify It Works
 
-1. Open Telegram
-2. Search for **@userinfobot**
-3. Start the bot
-4. It will display your User ID (a number like `123456789`)
+```bash
+# Check PM2 status — should show "nexus" as "online"
+pm2 status
 
-### Getting MiniMax API Key
+# View live logs
+pm2 logs nexus
 
-1. Go to [MiniMax Platform](https://platform.minimax.io)
-2. Sign up or log in
-3. Create an API key
-4. Copy the key to your `.env` file
+# Open Telegram and send /start to your bot
+```
+
+### Daily Usage Commands
+
+| Command | What it does |
+|---------|-------------|
+| `pm2 logs nexus` | View live logs |
+| `pm2 restart nexus` | Restart the bot |
+| `pm2 stop nexus` | Stop the bot |
+| `npm run rebuild` | Recompile TypeScript + restart |
+| `pm2 status` | Check if bot is running |
 
 ## Obsidian Vault Setup
 
@@ -312,7 +401,7 @@ NEXUS/
 │   ├── launcher/          # NEXUS Launcher (Tauri)
 │   │   ├── src/           # React frontend
 │   │   └── src-tauri/     # Rust backend
-│   ├── install.sh         # Legacy installer
+│   ├── install.sh         # One-click installer (8-step pipeline)
 │   ├── ecosystem.config.js # PM2 config
 │   └── .env.example       # Config template
 ├── install_launcher.sh    # Quick installer script
@@ -322,25 +411,47 @@ NEXUS/
 
 ## Troubleshooting
 
-### Bot not responding
+### Installation Issues
 
+| Problem | Solution |
+|---------|----------|
+| Node.js not found | `brew install node` or visit [nodejs.org](https://nodejs.org) |
+| Node.js < v18 | `brew upgrade node` or `nvm install 18` |
+| Homebrew not found | `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"` |
+| `npm install` fails | Check network. Try: `npm config set registry https://registry.npmmirror.com` |
+| PM2 install fails (EACCES) | `sudo npm install -g pm2` or fix npm prefix permissions |
+| TypeScript build fails | Run `npm install` again to ensure TypeScript is installed |
+
+### Runtime Issues
+
+**Bot not responding:**
 1. Check if NEXUS is running: `pm2 status`
 2. Check logs: `pm2 logs nexus`
 3. Restart: `pm2 restart nexus`
 
-### Obsidian sync issues
+**Bot crashes on start:**
+1. Run `node dist/index.js` directly to see the full error
+2. Check `.env` — make sure Bot Token, User ID, and API Key are filled in
+3. If you see "TELEGRAM_PROXY" errors, edit `.env` to set or remove the proxy
+
+**Can't connect to Telegram (China users):**
+1. Make sure a proxy (Clash/V2Ray) is running locally
+2. Edit `.env` and set `TELEGRAM_PROXY=http://127.0.0.1:7890` (or your proxy port)
+3. Restart: `pm2 restart nexus`
+
+### Obsidian Sync Issues
 
 1. Make sure iCloud is syncing your vault
 2. Check the vault path in `.env`
 3. Verify folder permissions
 
-### Newsflow not working
+### Newsflow Not Working
 
 1. Check API keys (MiniMax, Finnhub)
 2. Verify `NEWSFLOW_CHAT_ID` is set
 3. Check newsflow logs: look for `[Newsflow]` in `pm2 logs`
 
-### Database errors
+### Database Errors
 
 NEXUS will automatically run migrations on startup. If you see migration errors:
 1. Backup your vault
