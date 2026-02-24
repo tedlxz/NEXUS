@@ -348,13 +348,15 @@ export function companyTemplate(data: CompanyNoteData): string {
   fm.push(`listed: ${data.listed ? 'true' : 'false'}`);
   fm.push(`market: ${data.market || ''}`);
   fm.push(`ticker: ${data.ticker ? toYamlValue(data.ticker) : ''}`);
-  if (data.industry) fm.push(`industry: ${toYamlValue(data.industry)}`);
+  fm.push(data.industry ? `industry: ${toYamlValue(data.industry)}` : 'industry:');
   if (data.tags?.length) {
     fm.push('tags:');
     fm.push(toYamlList(data.tags));
+  } else {
+    fm.push('tags: []');
   }
-  if (data.website) fm.push(`website: ${toYamlValue(data.website)}`);
-  if (data.description) fm.push(`description: ${toYamlValue(data.description)}`);
+  fm.push(data.website ? `website: ${toYamlValue(data.website)}` : 'website:');
+  fm.push(data.description ? `description: ${toYamlValue(data.description)}` : 'description:');
   fm.push(`starred: ${data.starred ? 'true' : 'false'}`);
   fm.push(`created: ${now}`);
   fm.push(`updated: ${now}`);

@@ -7,6 +7,7 @@ import { CompaniesRepo } from './companies-repo';
 import { ConversationsRepo } from './conversations-repo';
 import { vaultPaths } from '../config';
 import { vaultWriter } from '../vault/writer';
+import { companyTemplate } from '../vault/templates';
 import { detectListedCompanyWithAI } from '../newsflow/services/starDataLoader';
 import type { StockMarket } from '../newsflow/types';
 
@@ -87,35 +88,14 @@ async function createCompanyObsidianFile(
     // File doesn't exist, create it
   }
 
-  let tickerLine = '';
-  if (isListed && ticker && market) {
-    tickerLine = `ticker: ${ticker}\nmarket: ${market}\n`;
-  }
-
-  const content = `---
-type: company
-name: "${name}"
-${tickerLine}industries: []
-tags: []
-starred: false
----
-
-# ${name}
-
-## Overview
-
-
-
-## Key Contacts
-
-
-
-## Recent News
-
-
-
-## Notes
-`;
+  const content = companyTemplate({
+    name,
+    listed: isListed,
+    ticker,
+    market,
+    related_contacts: [],
+    related_conversations: [],
+  });
 
   await fs.writeFile(filePath, content, 'utf-8');
   console.log(`[Sync] Created company file: ${fileName}`);
@@ -262,10 +242,16 @@ export async function syncFromObsidian(): Promise<{
         const website = data.website || null;
         const description = data.description || null;
         const starred = data.starred === true;
+        // Sync listed/market/ticker from Obsidian frontmatter
+        const listed = data.listed === true || data.listed === 'true';
+        const market = data.market && ['us', 'hk', 'cn', 'jp', 'kr'].includes(String(data.market))
+          ? (data.market as 'us' | 'hk' | 'cn' | 'jp' | 'kr')
+          : undefined;
+        const ticker = data.ticker ? String(data.ticker).trim() || undefined : undefined;
 
         obsidianCompanyNames.add(name.toLowerCase());
 
-        companiesRepo.upsertCompany({ name, industry, tags, website, description, starred }, tags);
+        companiesRepo.upsertCompany({ name, industry, tags, website, description, starred, listed, market, ticker }, tags);
 
         companiesUpdated++;
       } catch (err) {

@@ -4,9 +4,11 @@ import { ContactsRepo } from '../db/contacts-repo';
 import { CompaniesRepo } from '../db/companies-repo';
 import path from 'path';
 import fs from 'fs/promises';
+import matter from 'gray-matter';
 import { vaultPaths } from '../config';
 import { companyTemplate } from '../vault/templates';
 import { getUserVaultPaths } from '../vault/writer';
+import { detectListedCompanyWithAI } from '../newsflow/services/starDataLoader';
 
 /**
  * Migrate companies - OBSIDIAN IS THE SOURCE OF TRUTH
@@ -47,30 +49,25 @@ export async function migrateCompanies(userId?: string): Promise<void> {
       try {
         const filePath = path.join(companiesDir, file);
         const content = await fs.readFile(filePath, 'utf-8');
+        const { data } = matter(content);
 
-        // Extract company name from YAML frontmatter
-        const nameMatch = content.match(/^name:\s*"?([^"\n]+)"?/m);
-        if (nameMatch) {
-          const companyName = nameMatch[1].trim();
-          if (companyName) {
-            existingCompanyNames.set(companyName.toLowerCase(), companyName);
-            console.log(`[Migrate] Found existing company: ${companyName}`);
+        // Use gray-matter parsed name, fallback to filename
+        const companyName = (data.name ? String(data.name).trim() : '') || file.replace('.md', '');
+        if (companyName) {
+          existingCompanyNames.set(companyName.toLowerCase(), companyName);
+          console.log(`[Migrate] Found existing company: ${companyName}`);
 
-            // Parse "Related Contacts" section to build person→company map
-            // Format: - [[PersonName]] — Role (Current/Past)
-            const personLinks = content.matchAll(/\[\[([^\]]+)\]\]/g);
+          // Parse "Related Contacts" section to build person→company map
+          // Format: - [[PersonName]] — Role (Current/Past)
+          const relatedIdx = content.indexOf('## Related Contacts');
+          if (relatedIdx >= 0) {
+            const nextSectionIdx = content.indexOf('\n## ', relatedIdx + 1);
+            const sectionEnd = nextSectionIdx >= 0 ? nextSectionIdx : content.length;
+            const relatedSection = content.slice(relatedIdx, sectionEnd);
+            const personLinks = relatedSection.matchAll(/\[\[([^\]]+)\]\]/g);
             for (const match of personLinks) {
               const personName = match[1].trim();
-              // Only track if it's in the Related Contacts section (after "## Related Contacts")
-              const relatedIdx = content.indexOf('## Related Contacts');
-              const nextSectionIdx = content.indexOf('\n## ', relatedIdx + 1);
-              if (relatedIdx >= 0) {
-                const sectionEnd = nextSectionIdx >= 0 ? nextSectionIdx : content.length;
-                const relatedSection = content.slice(relatedIdx, sectionEnd);
-                if (relatedSection.includes(`[[${personName}]]`)) {
-                  personToCompany.set(personName, companyName);
-                }
-              }
+              personToCompany.set(personName, companyName);
             }
           }
         }
@@ -98,20 +95,24 @@ export async function migrateCompanies(userId?: string): Promise<void> {
       try {
         const filePath = path.join(peopleDir, file);
         const content = await fs.readFile(filePath, 'utf-8');
+        const { data } = matter(content);
 
-        const orgMatch = content.match(/current_org:\s*"?\[\[([^\]]+)\]\]"?/);
-        const nameMatch = content.match(/^name:\s*"?([^"\n]+)"?/m);
+        const personName = (data.name ? String(data.name).trim() : '') || file.replace('.md', '');
 
-        if (orgMatch && nameMatch) {
-          const companyName = orgMatch[1].trim();
-          const personName = nameMatch[1].trim();
+        // Extract current_org via gray-matter, handling both [[...]] and plain text
+        let currentOrg: string | null = null;
+        if (data.current_org) {
+          const orgStr = String(data.current_org).trim();
+          // Strip [[...]] wiki link wrapper if present
+          const linkMatch = orgStr.match(/^\[\[(.+)\]\]$/);
+          currentOrg = linkMatch ? linkMatch[1].trim() : orgStr || null;
+        }
 
-          if (companyName) {
-            if (!orgReferences.has(companyName)) {
-              orgReferences.set(companyName, []);
-            }
-            orgReferences.get(companyName)!.push({ personName, personFile: file });
+        if (currentOrg && personName) {
+          if (!orgReferences.has(currentOrg)) {
+            orgReferences.set(currentOrg, []);
           }
+          orgReferences.get(currentOrg)!.push({ personName, personFile: file });
         }
       } catch (err) {
         console.error(`[Migrate] Error reading ${file}:`, err);
@@ -197,21 +198,39 @@ export async function migrateCompanies(userId?: string): Promise<void> {
     for (const { personName, personFile } of persons) {
       try {
         const content = await fs.readFile(path.join(paths.people, personFile), 'utf-8');
-        const roleMatch = content.match(/current_role:\s*"?([^"\n]+)"?/m);
-        relatedContacts.push({
-          name: personName,
-          role: roleMatch ? roleMatch[1].trim() : '',
-          relationship: 'current'
-        });
+        const { data: personData } = matter(content);
+        const role = personData.current_role ? String(personData.current_role).trim() : '';
+        relatedContacts.push({ name: personName, role, relationship: 'current' });
       } catch {
         relatedContacts.push({ name: personName, role: '', relationship: 'current' });
       }
     }
 
+    // Use AI to detect if company is listed and get ticker
+    let isListed = false;
+    let detectedTicker: string | undefined;
+    let detectedMarket: 'us' | 'hk' | 'cn' | 'jp' | 'kr' | undefined;
+    try {
+      const detection = await detectListedCompanyWithAI(orgName);
+      isListed = detection.isListed;
+      if (detection.ticker && detection.ticker.trim()) {
+        detectedTicker = detection.ticker.trim();
+      }
+      if (detection.market && ['us', 'hk', 'cn', 'jp', 'kr'].includes(detection.market)) {
+        detectedMarket = detection.market as 'us' | 'hk' | 'cn' | 'jp' | 'kr';
+      }
+      console.log(`[Migrate] AI detection for "${orgName}": listed=${isListed}, ticker=${detectedTicker}, market=${detectedMarket}`);
+    } catch (err) {
+      console.error(`[Migrate] AI detection failed for "${orgName}":`, err);
+    }
+
     const content = companyTemplate({
       name: orgName,
+      listed: isListed,
+      ticker: detectedTicker,
+      market: detectedMarket,
       related_contacts: relatedContacts,
-      related_conversations: []
+      related_conversations: [],
     });
 
     await fs.writeFile(filePath, content, 'utf-8');

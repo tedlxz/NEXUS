@@ -25,17 +25,19 @@ export async function detectListedCompanyWithAI(companyName: string): Promise<{
   const messages = [
     {
       role: 'system',
-      content: `你是一个专业的金融分析师。请根据公司名称判断是否是上市公司，并给出股票代码。
+      content: `你是一个专业的金融分析师。请根据公司名称判断是否是上市公司，并给出准确的股票代码。
 
 判断规则：
-1. 如果是上市公司，给出准确的股票代码和市场
-2. 美股：通常是无后缀的大写字母（如 AAPL, MSFT, GOOGL）
-3. 港股：带 .HK 后缀（如 00700.HK, 09988.HK）
-4. A股：带 .SS（上海）或 .SZ（深圳）后缀（如 600519.SS, 000001.SZ）
-5. 如果不是上市公司或无法确定，返回 isListed: false
+1. 如果是上市公司，给出准确的股票代码和上市市场
+2. 美股（NASDAQ/NYSE）：无后缀大写字母，如 AAPL, MSFT, GOOGL, META, AMZN, NVDA, TSLA
+3. 港股：带 .HK 后缀，如 00700.HK, 09988.HK, 03690.HK
+4. A股上交所：带 .SS 后缀，如 600519.SS, 601398.SS
+5. A股深交所：带 .SZ 后缀，如 000001.SZ, 300750.SZ
+6. 如果不是上市公司、无法确定或私有公司，isListed 设为 false，ticker 和 market 设为 null
 
-请用以下 JSON 格式返回：
-{"isListed": true/false, "ticker": "股票代码或空", "market": "us/hk/cn/other 或空", "reasoning": "简短判断理由"}`
+严格按以下 JSON 格式返回（ticker 和 market 不确定时必须填 null，不能填空字符串）：
+{"isListed": true, "ticker": "GOOGL", "market": "us", "reasoning": "Google parent Alphabet listed on NASDAQ"}
+{"isListed": false, "ticker": null, "market": null, "reasoning": "Private company"}`
     },
     {
       role: 'user',
@@ -44,20 +46,34 @@ export async function detectListedCompanyWithAI(companyName: string): Promise<{
   ];
 
   try {
-    const result = await callMiniMax(messages as any, { temperature: 0.3 });
-    
-    // Parse JSON from response
-    const jsonMatch = result.match(/\{[\s\S]*\}/);
+    const result = await callMiniMax(messages as any, { temperature: 0.1 });
+
+    // Parse JSON from response (use non-greedy match to get first JSON object)
+    const jsonMatch = result.match(/\{[\s\S]*?\}/);
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0]);
+
+      // Validate ticker: must be a non-empty string
+      let ticker: string | undefined;
+      if (parsed.ticker && typeof parsed.ticker === 'string' && parsed.ticker.trim()) {
+        ticker = parsed.ticker.trim();
+      }
+
+      // Validate market: must be one of the known StockMarket values (us/hk/cn)
+      let market: StockMarket | undefined;
+      const validMarkets: StockMarket[] = ['us', 'hk', 'cn'];
+      if (parsed.market && validMarkets.includes(parsed.market as StockMarket)) {
+        market = parsed.market as StockMarket;
+      }
+
       return {
-        isListed: parsed.isListed || false,
-        ticker: parsed.ticker,
-        market: parsed.market,
-        reasoning: parsed.reasoning
+        isListed: parsed.isListed === true,
+        ticker,
+        market,
+        reasoning: parsed.reasoning,
       };
     }
-    
+
     return { isListed: false };
   } catch (error) {
     console.error(`[Newsflow] Error detecting listed company for ${companyName}:`, error);
