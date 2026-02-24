@@ -1,3 +1,9 @@
+## 📦 v0.3.6 (2026-02-24)
+
+- Update
+
+---
+
 ## 📦 v0.3.5 (2026-02-24)
 
 - Update
@@ -32,7 +38,7 @@
 
 > Personal Network Management for Private Equity Professionals
 
-![Version](https://img.shields.io/badge/version-0.3.5-blue)
+![Version](https://img.shields.io/badge/version-0.3.6-blue)
 ![Node.js](https://img.shields.io/badge/Node.js-18%2B-green)
 ![Platform](https://img.shields.io/badge/platform-macOS-lightgrey)
 
