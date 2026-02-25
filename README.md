@@ -1,8 +1,5 @@
 ## 📦 v0.3.6 (2026-02-25)
 
-- Add .claude/ to .gitignore (exclude Claude Code settings from GitHub)
-- Create CLAUDE.md with project preferences
-- Claude Code settings now stored in iCloud: ~/Library/Mobile Documents/com~apple~CloudDocs/Documents/ClaudeSettings/
 - Remove .DS_Store files from git tracking
 
 ---
