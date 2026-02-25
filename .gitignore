@@ -41,6 +41,9 @@ Dashboard.md
 NEXUS_PRD_v3_Obsidian.md
 Newsflow_Coding_Plan.md
 
+# Claude Code settings
+.claude/
+
 # Launcher build (not source)
 main/launcher/dist/
 main/launcher/node_modules/
